@@ -1,0 +1,31 @@
+services:
+  triton:
+    build: ./engine/triton
+    volumes:
+      - ./engine/triton/model_repository:/models
+      # Mount scripts so they can be updated without rebuild
+      - ./engine/triton/entry-level.sh:/opt/entry-level.sh
+      - ./engine/triton/entrypoint.sh:/opt/entrypoint.sh
+    ports:
+      - "8000:8000"   # HTTP
+      - "8001:8001"   # gRPC
+      - "8002:8002"   # Metrics
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # client:
+  #   build: ./engine/client
+  #   volumes:
+  #     - ./assets:/audio
+  #   environment:
+  #     - TRITON_URL=triton:8001
+  #   depends_on:
+  #     - triton
+  #   # Override default command to specify audio file
+  #   command: ["--audio", "/audio/test.wav"]
+

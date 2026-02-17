@@ -1,0 +1,31 @@
+name: "muaalem"
+platform: "pytorch_libtorch"
+max_batch_size: 32
+
+input [
+  { name: "input_features__0", data_type: TYPE_BF16, dims: [ -1 ] },
+  { name: "attention_mask__0", data_type: TYPE_INT32, dims: [ -1 ] }
+]
+
+output [
+  { name: "ghonna_logits", data_type: TYPE_BF16, dims: [ -1, 3 ] },
+  { name: "hams_or_jahr_logits", data_type: TYPE_BF16, dims: [ -1, 3 ] },
+  { name: "istitala_logits", data_type: TYPE_BF16, dims: [ -1, 3 ] },
+  { name: "itbaq_logits", data_type: TYPE_BF16, dims: [ -1, 3 ] },
+  { name: "phonemes_logits", data_type: TYPE_BF16, dims: [ -1, 43 ] },
+  { name: "qalqla_logits", data_type: TYPE_BF16, dims: [ -1, 3 ] },
+  { name: "safeer_logits", data_type: TYPE_BF16, dims: [ -1, 3 ] },
+  { name: "shidda_or_rakhawa_logits", data_type: TYPE_BF16, dims: [ -1, 4 ] },
+  { name: "tafashie_logits", data_type: TYPE_BF16, dims: [ -1, 3 ] },
+  { name: "tafkheem_or_taqeeq_logits", data_type: TYPE_BF16, dims: [ -1, 4 ] },
+  { name: "tikraar_logits", data_type: TYPE_BF16, dims: [ -1, 3 ] }
+]
+
+dynamic_batching {
+  preferred_batch_size: [ 2, 4, 8, 16, 32 ]
+  max_queue_delay_microseconds: 100
+}
+
+instance_group [
+  { kind: KIND_GPU, count: 1 }
+]

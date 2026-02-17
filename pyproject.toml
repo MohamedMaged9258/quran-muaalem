@@ -47,6 +47,10 @@ ui = [
     "moviepy>=2.2.1",
 ]
 
+engine = [
+    "tritonclient[grpc]>=2.65.0",
+]
+
 
 [project.scripts]
 quran-muaalem-ui = "quran_muaalem.gradio_app:main"
