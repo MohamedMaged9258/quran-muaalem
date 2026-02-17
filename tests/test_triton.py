@@ -7,13 +7,23 @@ from transformers import AutoFeatureExtractor
 import torch
 from librosa import load
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio", type=str, default="./assets/test.wav")
     parser.add_argument("--url", type=str, default="triton:8001")
     parser.add_argument("--model", type=str, default="muaalem")
+    parser.add_argument("--dtype", type=str, default="fp16",
+                        choices=["fp16", "bf16", "fp32"],
+                        help="Data type for input_features (default: fp16)")
     args = parser.parse_args()
+
+    # Map dtype argument to torch and triton types
+    dtype_map = {
+        "fp16": (torch.float16, "FP16"),
+        "bf16": (torch.bfloat16, "BF16"),
+        "fp32": (torch.float32, "FP32"),
+    }
+    torch_dtype, triton_dtype = dtype_map[args.dtype]
 
     # Load processor from Hugging Face repo
     repo_id = "obadx/muaalem-v3_2-torchscript"
@@ -26,27 +36,28 @@ def main():
     # Preprocess: returns torch tensors (input_features shape: [1, time])
     inputs = processor(wave, sampling_rate=16000, return_tensors="pt", padding=True)
 
-    # Convert to required dtypes
-    input_features = inputs["input_features"].to(
-        dtype=torch.bfloat16
-    )  # model expects bf16
-    attention_mask = inputs["attention_mask"].to(
-        dtype=torch.int32
-    )  # model expects int32
+    # Convert input_features to selected dtype
+    input_features = inputs["input_features"].to(dtype=torch_dtype)
+    attention_mask = inputs["attention_mask"].to(dtype=torch.int32)  # always int32
 
     # Triton client
     client = grpcclient.InferenceServerClient(url=args.url, verbose=False)
 
     # Prepare input tensors
-    # For BF16, we provide the raw uint16 representation (same bit width)
     inp0 = grpcclient.InferInput(
-        "input_features__0", list(input_features.shape), "BF16"
+        "input_features", list(input_features.shape), triton_dtype
     )
-    # Convert bf16 tensor to uint16 numpy array (preserves bit pattern)
-    inp0.set_data_from_numpy(input_features.view(torch.uint16).numpy())
+
+    # Handle BF16 special case: need to send as uint16
+    if args.dtype == "bf16":
+        # bfloat16 has no direct numpy equivalent; send raw uint16 bits
+        inp0.set_data_from_numpy(input_features.view(torch.uint16).numpy())
+    else:
+        # fp16 and fp32 can be sent directly
+        inp0.set_data_from_numpy(input_features.numpy())
 
     inp1 = grpcclient.InferInput(
-        "attention_mask__0", list(attention_mask.shape), "INT32"
+        "attention_mask", list(attention_mask.shape), "INT32"
     )
     inp1.set_data_from_numpy(attention_mask.numpy())
 
@@ -87,7 +98,6 @@ def main():
     pred_ids = np.argmax(phonemes_logits, axis=-1)
     print(f"Phonemes argmax shape: {pred_ids.shape}")
     print(f"First 10 predicted ids: {pred_ids[0][:10]}")
-
 
 if __name__ == "__main__":
     main()

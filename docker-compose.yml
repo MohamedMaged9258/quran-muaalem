@@ -4,8 +4,8 @@ services:
     volumes:
       - ./engine/triton/model_repository:/models
       # Mount scripts so they can be updated without rebuild
-      - ./engine/triton/entry-level.sh:/opt/entry-level.sh
-      - ./engine/triton/entrypoint.sh:/opt/entrypoint.sh
+      # - ./engine/triton/entry-level.sh:/opt/entry-level.sh
+      # - ./engine/triton/entrypoint.sh:/opt/entrypoint.sh
     ports:
       - "8000:8000"   # HTTP
       - "8001:8001"   # gRPC

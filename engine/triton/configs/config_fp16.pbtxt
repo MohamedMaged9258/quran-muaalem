@@ -3,8 +3,8 @@ platform: "pytorch_libtorch"
 max_batch_size: 32
 
 input [
-  { name: "input_features__0", data_type: TYPE_FP16, dims: [ -1 ] },
-  { name: "attention_mask__0", data_type: TYPE_INT32, dims: [ -1 ] }
+  { name: "input_features", data_type: TYPE_FP16, dims: [ -1, 160 ] },
+  { name: "attention_mask", data_type: TYPE_INT32, dims: [ -1 ] }
 ]
 
 output [
