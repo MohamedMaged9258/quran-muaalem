@@ -12,33 +12,24 @@ fi
 
 mkdir -p "$OUTPUT_DIR"
 
-# Install huggingface-cli if missing
-if ! command -v huggingface-cli &> /dev/null; then
-    echo "📦 huggingface-cli not found. Installing..."
-    curl -LsSf https://hf.co/cli/install.sh | bash
-    export PATH="$HOME/.local/bin:$PATH"
-fi
-
 # Detect GPU compute capability and choose best dtype
 detect_best_dtype() {
     if ! command -v nvidia-smi &> /dev/null; then
-        echo "⚠️  No GPU detected – falling back to fp32"
+        echo >&2 "⚠️  No GPU detected – falling back to fp32"
         echo "fp32"
         return
     fi
     COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 | tr -d ' ')
     if [ -z "$COMPUTE_CAP" ]; then
-        echo "⚠️  Could not read compute capability – falling back to fp32"
+        echo >&2 "⚠️  Could not read compute capability – falling back to fp32"
         echo "fp32"
         return
     fi
     MAJOR=$(echo "$COMPUTE_CAP" | cut -d. -f1)
-    echo "✅ Detected GPU compute capability: $COMPUTE_CAP"
+    echo >&2 "✅ Detected GPU compute capability: $COMPUTE_CAP"
     if [ "$MAJOR" -ge 8 ]; then
-        # Ampere or newer: bf16 preferred
         echo "bf16"
     else
-        # Older: fp16 preferred
         echo "fp16"
     fi
 }
@@ -77,7 +68,7 @@ download_model() {
         fi
         tried+="$candidate "
         echo "⏳ Attempting to download $candidate ..."
-        if huggingface-cli download "$REPO_ID" "$candidate" --local-dir "$OUTPUT_DIR" --quiet 2>/dev/null; then
+        if uvx hf download "$REPO_ID" "$candidate" --local-dir "$OUTPUT_DIR" --quiet 2>/dev/null; then
             mv "$OUTPUT_DIR/$candidate" "$target"
             echo "✅ Downloaded $candidate as $target"
             # Update BEST_DTYPE to match actual downloaded file
@@ -100,11 +91,5 @@ download_model
 # Copy the matching config file to the model repository root
 echo "📝 Installing config for dtype $BEST_DTYPE"
 cp "$CONFIG_DIR/$CONFIG_FILE" "/models/muaalem/config.pbtxt"
-
-# Also download processor (optional, for client use)
-echo "📂 Downloading processor files..."
-if ! huggingface-cli download "$REPO_ID" processor/ --local-dir "/models/muaalem/processor" --quiet; then
-    echo "⚠️  Failed to download processor folder (optional)"
-fi
 
 echo "🎉 Model and config ready in /models/muaalem"
