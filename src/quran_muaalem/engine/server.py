@@ -29,9 +29,9 @@ class QuranMuaalemAPI:
         try:
             audio_bytes = await audio.read()
 
-            features = await self.preprocessing.remote(audio_bytes)
+            model_input = await self.preprocessing.remote(audio_bytes)
 
-            logits = await self.model.remote(**features)
+            logits = await self.model.remote(model_input)
 
             result = await self.postprocessing.remote(logits)
 

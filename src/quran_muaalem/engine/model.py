@@ -3,11 +3,14 @@ import os
 import torch
 from ray import serve
 from ..modeling.modeling_multi_level_ctc import Wav2Vec2BertForMultilevelCTC
+from .types import ModelInput
 
 
 @serve.deployment(
     name="model",
     ray_actor_options={"num_gpus": 1},
+    num_replicas=1,
+    max_ongoing_requests=32,
 )
 class ModelDeployment:
     def __init__(
@@ -24,16 +27,44 @@ class ModelDeployment:
         self.model.to(self.device, dtype=dtype)
         self.model.eval()
 
-    @torch.no_grad()
-    # @serve.batch(max_batch_size=32, batch_wait_timeout_s=0.1) TODO:
-    def __call__(
-        self, input_features: torch.FloatTensor, attention_mask: torch.LongTensor
+    @serve.batch(
+        max_batch_size=32,
+        batch_wait_timeout_s=2,
+    )
+    async def predict(
+        self,
+        model_inputs: list[ModelInput],
+    ) -> list[dict[str, torch.Tensor]]:
+
+        with torch.inference_mode():
+            print("Batch Size")
+            print(len(model_inputs))
+            input_features = torch.cat([i.input_features for i in model_inputs]).to(
+                self.device, dtype=self.dtype
+            )
+            attention_mask = torch.cat([i.attention_mask for i in model_inputs]).to(
+                self.device, dtype=self.dtype
+            )
+
+            level_to_logits = self.model(
+                input_features, attention_mask, return_dict=False
+            )[0]
+
+            list_of_level_to_logits = []
+            d = {}
+            for idx in range(level_to_logits["phonemes"].shape[0]):
+                for level in level_to_logits:
+                    d[level] = (
+                        level_to_logits[level][idx]
+                        .cpu()
+                        .to(dtype=torch.float32)
+                        .unsqueeze(0)
+                    )
+                list_of_level_to_logits.append(d)
+            return list_of_level_to_logits
+
+    async def __call__(
+        self,
+        model_input: ModelInput,
     ) -> dict[str, torch.Tensor]:
-        input_features = input_features.to(self.device, dtype=self.dtype)
-        attention_mask = attention_mask.to(self.device, dtype=self.dtype)
-
-        level_to_logits = self.model(input_features, attention_mask, return_dict=False)[
-            0
-        ]
-
-        return {v: g.cpu() for v, g in level_to_logits.items()}
+        return await self.predict(model_input)

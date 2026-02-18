@@ -60,7 +60,8 @@ from ..decode import ctc_decode
 
 @serve.deployment(
     name="postprocessing",
-    ray_actor_options={"num_cpus": 2},
+    ray_actor_options={"num_cpus": 1},
+    num_replicas=1,
 )
 class PostProcessingDeployment:
     def __init__(self, model_name_or_path: str = "obadx/muaalem-model-v3_2"):
