@@ -1,25 +1,27 @@
+import os
+
 import torch
 from ray import serve
+from ..modeling.modeling_multi_level_ctc import Wav2Vec2BertForMultilevelCTC
 
 
 @serve.deployment(
     name="model",
-    # ray_actor_options={"num_gpus": 1},TODO:
+    ray_actor_options={"num_gpus": 1},
 )
 class ModelDeployment:
     def __init__(
         self,
         model_name_or_path: str = "obadx/muaalem-model-v3_2",
-        device: str = "cpu",
         dtype=torch.bfloat16,
     ):
-        from ..modeling.modeling_multi_level_ctc import Wav2Vec2BertForMultilevelCTC
 
-        self.device = device
+        device_id = os.environ.get("cuda_visible_devices", "0").split(",")[0]
+        self.device = f"cuda:{device_id}"
         self.dtype = dtype
 
         self.model = Wav2Vec2BertForMultilevelCTC.from_pretrained(model_name_or_path)
-        self.model.to(device, dtype=dtype)
+        self.model.to(self.device, dtype=dtype)
         self.model.eval()
 
     @torch.no_grad()
@@ -34,4 +36,4 @@ class ModelDeployment:
             0
         ]
 
-        return level_to_logits
+        return {v: g.cpu() for v, g in level_to_logits.items()}
