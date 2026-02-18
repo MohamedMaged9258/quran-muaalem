@@ -47,6 +47,7 @@ ui = [
     "moviepy>=2.2.1",
 ]
 engine = [
+    "aiohttp>=3.13.3",
     "ray[serve]>=2.54.0",
 ]
 
