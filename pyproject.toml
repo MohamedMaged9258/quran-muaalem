@@ -17,7 +17,7 @@ readme = "README.md"
 dependencies = [
     "diff-match-patch>=20241021",
     "numpy>=2.2.6",
-    "quran-transcript>=0.1.0",
+    "quran-transcript>=0.5.1",
     "rich>=14.1.0",
     "torch>=2.7.0",
     "transformers>=4.55.0",
@@ -45,6 +45,9 @@ ui = [
     "librosa>=0.11.0",
     "numba>=0.61.2",
     "moviepy>=2.2.1",
+]
+engine = [
+    "ray[serve]>=2.54.0",
 ]
 
 
