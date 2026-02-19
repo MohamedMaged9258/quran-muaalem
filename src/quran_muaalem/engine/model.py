@@ -1,16 +1,18 @@
+from pandas.io.pytables import performance_doc
 import os
 
 import torch
 from ray import serve
 from ..modeling.modeling_multi_level_ctc import Wav2Vec2BertForMultilevelCTC
 from .types import ModelInput
+from time import perf_counter
 
 
 @serve.deployment(
     name="model",
     ray_actor_options={"num_gpus": 1},
     num_replicas=1,
-    max_ongoing_requests=32,
+    max_ongoing_requests=128,
 )
 class ModelDeployment:
     def __init__(
@@ -37,6 +39,7 @@ class ModelDeployment:
     ) -> list[dict[str, torch.Tensor]]:
 
         with torch.inference_mode():
+            start = perf_counter()
             print("Batch Size")
             print(len(model_inputs))
             input_features = torch.cat([i.input_features for i in model_inputs]).to(
@@ -61,6 +64,8 @@ class ModelDeployment:
                         .unsqueeze(0)
                     )
                 list_of_level_to_logits.append(d)
+            end = perf_counter()
+            print(f"Model Time: {end - start}")
             return list_of_level_to_logits
 
     async def __call__(

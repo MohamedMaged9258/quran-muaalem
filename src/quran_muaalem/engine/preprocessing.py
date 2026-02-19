@@ -1,3 +1,4 @@
+from time import perf_counter
 import io
 import numpy as np
 import torch
@@ -28,13 +29,15 @@ def load_audio(audio: AudioInput, target_sr: int = 16000) -> tuple[np.ndarray, i
 @serve.deployment(
     name="preprocessing",
     ray_actor_options={"num_cpus": 1},
-    num_replicas=1,
+    num_replicas=10,
+    max_ongoing_requests=64,
 )
 class PreprocessingDeployment:
     def __init__(self, model_name_or_path: str = "obadx/muaalem-model-v3_2"):
         self.processor = AutoFeatureExtractor.from_pretrained(model_name_or_path)
 
     def __call__(self, audio: bytes) -> ModelInput:
+        start = perf_counter()
         audio_array, sampling_rate = load_audio(audio, target_sr=16000)
 
         if sampling_rate != 16000:
@@ -45,6 +48,8 @@ class PreprocessingDeployment:
             sampling_rate=sampling_rate,
             return_tensors="pt",
         )
+        end = perf_counter()
+        print(f"Pre time: {end - start}")
 
         return ModelInput(
             input_features=features["input_features"],

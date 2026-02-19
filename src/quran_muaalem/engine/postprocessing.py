@@ -1,3 +1,4 @@
+from time import perf_counter
 import torch
 from ray import serve
 
@@ -62,12 +63,14 @@ from ..decode import ctc_decode
     name="postprocessing",
     ray_actor_options={"num_cpus": 1},
     num_replicas=1,
+    max_ongoing_requests=64,
 )
 class PostProcessingDeployment:
     def __init__(self, model_name_or_path: str = "obadx/muaalem-model-v3_2"):
         self.multi_level_tokenizer = MultiLevelTokenizer(model_name_or_path)
 
     def __call__(self, level_to_logits: dict[str, torch.Tensor]) -> dict:
+        start = perf_counter()
         level_to_probs = {}
         for level, logits in level_to_logits.items():
             probs = torch.nn.functional.softmax(logits, dim=-1)
@@ -75,6 +78,8 @@ class PostProcessingDeployment:
 
         phonemes_probs = level_to_probs["phonemes"]
         batch_probs, batch_ids = phonemes_probs.topk(1, dim=-1)
+        end = perf_counter()
+        print(f"Post time: {end - start}")
         return batch_ids.tolist()  # TODO:
 
         # TODO:
