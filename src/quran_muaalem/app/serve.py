@@ -9,6 +9,7 @@ import httpx
 from fastapi import FastAPI, UploadFile, File, Query, Body, Form, Depends, status
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import Json
 
 
@@ -24,6 +25,7 @@ from .types import (
     SearchResponse,
     SearchResultResponse,
     CorrectRecitationResponse,
+    CorrectRecitationNoMatchResponse,
     ReciterErrorResponse,
     PhonemesSearchSpanApp,
     TajweedRuleApp,
@@ -356,6 +358,12 @@ async def search(
 @app.post(
     "/correct-recitation",
     response_model=CorrectRecitationResponse,
+    responses={
+        404: {
+            "model": CorrectRecitationNoMatchResponse,
+            "description": "Predicted phonemes generated, but no Quran match found",
+        }
+    },
     tags=["Recitation"],
     summary="Analyze and Correct Recitation",
     description="""Analyze audio recording and detect recitation errors with Tajweed rule violations.
@@ -472,14 +480,13 @@ async def correct_recitation(
     )
 
     if not search_results:
-        return HTTPException(
-            status_code= status.HTTP_404_NOT_FOUND,
-            headers= {"Content-Type": "application/json"},
-
-            detail= message or "No results found. Try increasing error_ratio."
+        return JSONResponse(
+            status_code=404,
+            content=CorrectRecitationNoMatchResponse(
+                predicted_phonemes=predicted_phonemes,
+                message=message or "No results found. Try increasing error_ratio.",
+            ).model_dump(),
         )
-
-        # raise ValueError(message or "No results found. Try increasing error_ratio.")
 
     best_result = search_results[0]
 
