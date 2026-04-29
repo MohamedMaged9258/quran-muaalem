@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install *)",
+      "Bash(conda activate *)",
+      "Bash(python -m quran_muaalem.engine.main)",
+      "Bash(uv sync *)",
+      "Bash(python -m pip install --upgrade uv)",
+      "PowerShell(uv sync)",
+      "PowerShell(c:\\\\Python314\\\\Scripts\\\\uv.exe sync)",
+      "Bash(python3.14 -m pip list)",
+      "Bash(python3.14 -m uv sync)",
+      "PowerShell(nvidia-smi)",
+      "PowerShell(Get-PnpDevice | Where-Object {$_.Class -eq 'Display'} | Select-Object Name, Status)",
+      "Bash(exit)",
+      "Bash(python3.14 -m uv run quran-muaalem-engine)",
+      "Bash(python3.14 -m uv run quran-muaalem-app)",
+      "PowerShell(Stop-Process -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(\"Services stopped\")"
+    ]
+  }
+}

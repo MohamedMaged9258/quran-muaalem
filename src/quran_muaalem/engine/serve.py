@@ -56,12 +56,22 @@ class QuranMuaalemAPI(ls.LitAPI):
         self.multi_level_tokenizer = MultiLevelTokenizer(self.model_name_or_path)
 
     def setup(self, device):
-        self.device = device
+        self.device = torch.device(device) if isinstance(device, str) else device
+        is_cpu = (self.device.type == "cpu")
+
+        # Use float32 on CPU (bfloat16 not supported)
+        dtype_to_use = torch.float32 if is_cpu and self.dtype == torch.bfloat16 else self.dtype
+
         self.processor = AutoFeatureExtractor.from_pretrained(self.model_name_or_path)
         self.model = Wav2Vec2BertForMultilevelCTC.from_pretrained(
-            self.model_name_or_path
+            self.model_name_or_path,
+            torch_dtype=dtype_to_use,
+            device_map=None,  # Avoid auto device mapping that triggers CUDA
         )
-        self.model.to(device, dtype=self.dtype)
+
+        if not is_cpu:
+            self.model = self.model.to(self.device, dtype=self.dtype)
+
         self.model.eval()
 
     def decode_request(self, request: Annotated[UploadFile, File()]):

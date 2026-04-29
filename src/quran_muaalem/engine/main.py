@@ -1,3 +1,4 @@
+import torch
 import litserve as ls
 
 from .serve import QuranMuaalemAPI
@@ -6,6 +7,11 @@ from .settings import EngineSettings
 
 def main():
     engine_settings = EngineSettings()
+
+    # Override accelerator to CPU if CUDA is not available
+    accelerator = engine_settings.accelerator
+    if accelerator == "cuda" and not torch.cuda.is_available():
+        accelerator = "cpu"
 
     # Instantiate the API with engine_settings
     api = QuranMuaalemAPI(
@@ -16,10 +22,10 @@ def main():
         batch_timeout=engine_settings.batch_timeout,
     )
 
-    # Create the LitServer, passing batching parameters to avoid the warning
+    # Create the LitServer with CPU accelerator if needed
     server = ls.LitServer(
         api,
-        accelerator=engine_settings.accelerator,
+        accelerator=accelerator,
         devices=engine_settings.devices,
         timeout=engine_settings.timeout,
         workers_per_device=engine_settings.workers_per_device,

@@ -16,13 +16,17 @@ description = "Quran Phonetic Script with addional quarnic utils"
 readme = "README.md"
 dependencies = [
     "diff-match-patch>=20241021",
+    "librosa>=0.11.0",
+    "litserve>=0.2.17",
     "numpy>=2.2.6",
+    "pydantic-settings>=2.13.1",
+    "python-multipart>=0.0.20",
     "quran-transcript>=0.5.2",
     "rich>=14.1.0",
-    "torch>=2.7.0",
+    "torch>=2.4.0",
     "transformers>=4.55.0",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.13"
 classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -69,3 +73,13 @@ Issues = "https://github.com/obadx/quran-muaalem/issues"
 # for addint data: https://setuptools.pypa.io/en/latest/userguide/datafiles.html#package-data
 # [tool.setuptools.package-data]
 # quran_transcript = ["quran-script/*"]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }
