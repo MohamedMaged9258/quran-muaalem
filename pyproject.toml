@@ -71,6 +71,8 @@ training = [
 quran-muaalem-ui = "quran_muaalem.gradio_app:main"
 quran-muaalem-engine = "quran_muaalem.engine.main:main"
 quran-muaalem-app = "quran_muaalem.app:main"
+quran-muaalem-msa-api = "quran_muaalem.msa.api:main"
+quran-muaalem-msa-ui = "quran_muaalem.msa.ui:main"
 
 [project.urls]
 Homepage = "https://github.com/obadx/quran-muaalem"

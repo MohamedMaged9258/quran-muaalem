@@ -33,7 +33,7 @@ python3.14 -m uv sync --extra training
 python3.14 -m uv sync --extra test
 ```
 
-### Run the three services (in three terminals, in order)
+### Run the upstream Quranic stack (three terminals, in order)
 
 ```bash
 python3.14 -m uv run quran-muaalem-engine   # port 8000, must start first
@@ -41,7 +41,14 @@ python3.14 -m uv run quran-muaalem-app      # port 8001
 python3.14 -m uv run quran-muaalem-ui       # port 7860
 ```
 
-Configuration is via `.env` at the repo root. The repo ships with `ACCELERATOR=cpu`, `DTYPE=float32`, and `ENGINE_URL=http://127.0.0.1:8000/predict` for CPU-only systems.
+### Run the MSA stack (two terminals, independent of the Quranic one)
+
+```bash
+python3.14 -m uv run quran-muaalem-msa-api  # port 8010, FastAPI + fine-tuned model
+python3.14 -m uv run quran-muaalem-msa-ui   # port 7870, Gradio UI
+```
+
+Configuration is via `.env` at the repo root. The repo ships with `ACCELERATOR=cpu`, `DTYPE=float32`, and `ENGINE_URL=http://127.0.0.1:8000/predict` for CPU-only systems. MSA service is configured via `MSA_*` env vars (see [src/quran_muaalem/msa/settings.py](src/quran_muaalem/msa/settings.py)).
 
 ### Tests
 
@@ -149,5 +156,6 @@ The adapted checkpoint MUST contain `preprocessor_config.json` (feature extracto
 | MSA dataset / data prep | [src/quran_muaalem/data/](src/quran_muaalem/data/) |
 | MSA trainer | [src/quran_muaalem/training/train_msa.py](src/quran_muaalem/training/train_msa.py) |
 | Train entry point | [train_msa_simple.py](train_msa_simple.py) |
+| MSA serving (API + UI) | [src/quran_muaalem/msa/](src/quran_muaalem/msa/) |
 | Pytest config | [tests/conftest.py](tests/conftest.py) |
 | Runtime config | [.env](.env), [pyproject.toml](pyproject.toml) |

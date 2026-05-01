@@ -6,25 +6,13 @@ This document covers how to install the project and run the live system (engine 
 
 ## 1. The System at a Glance
 
-There are three independent processes that talk to each other over HTTP:
+Two coexisting stacks share this repo:
+
+### Upstream Quranic stack (3 processes)
 
 ```
-                ┌─────────────────────┐
-   browser ────►│  Gradio UI          │  port 7860
-                │  (gradio_app)       │
-                └──────────┬──────────┘
-                           │ HTTP
-                           ▼
-                ┌─────────────────────┐
-                │  App (REST API)     │  port 8001
-                │  (quran-muaalem-app)│  search, correction, alignment
-                └──────────┬──────────┘
-                           │ HTTP
-                           ▼
-                ┌─────────────────────┐
-                │  Engine (model)     │  port 8000
-                │  LitServe + model   │  audio → phonemes
-                └─────────────────────┘
+   browser ─► Gradio UI :7860 ─► App (FastAPI) :8001 ─► Engine (LitServe) :8000
+                                                          (Quranic multi-level model)
 ```
 
 | Service | Port | Started by | Purpose |
@@ -34,6 +22,19 @@ There are three independent processes that talk to each other over HTTP:
 | **UI** | 7860 | `quran-muaalem-ui` | Gradio web interface. Calls the app. |
 
 You can run any subset, but UI needs App, and App needs Engine.
+
+### MSA stack (2 processes, fine-tuned model)
+
+```
+   browser ─► Gradio UI :7870 ─► API (FastAPI) :8010 ─► fine-tuned MSA checkpoint
+```
+
+| Service | Port | Started by | Purpose |
+|---|---|---|---|
+| **MSA API** | 8010 | `quran-muaalem-msa-api` | Loads the fine-tuned MSA model. Endpoints: `/transcribe`, `/align`, `/compare`, `/health`. |
+| **MSA UI** | 7870 | `quran-muaalem-msa-ui` | Gradio frontend with three tabs (Transcribe, Align, Compare). |
+
+The two stacks are independent — run either, both, or neither. They use different ports so nothing collides.
 
 ---
 
@@ -90,8 +91,13 @@ These are read by Pydantic settings classes:
 | `MAX_AUDIO_SECONDS` | engine | `15` | Hard cap per request. |
 | `ENGINE_URL` | app | `http://0.0.0.0:8000/predict` | App's pointer to the engine. |
 | `PORT` | app | `8001` | App bind port (override via env). |
+| `MSA_MODEL_PATH` | msa-api | `checkpoints/msa_model_v1/best_model` | Fine-tuned MSA checkpoint. |
+| `MSA_DEVICE` | msa-api | `cpu` | `cpu` or `cuda`. Auto-falls back to CPU. |
+| `MSA_API_PORT` | msa-api | `8010` | MSA API bind port. |
+| `MSA_API_URL` | msa-ui | `http://127.0.0.1:8010` | Where the UI looks for the API. |
+| `MSA_UI_PORT` | msa-ui | `7870` | MSA UI bind port. |
 
-For full lists see [src/quran_muaalem/engine/settings.py](src/quran_muaalem/engine/settings.py) and [src/quran_muaalem/app/settings.py](src/quran_muaalem/app/settings.py).
+For full lists see [src/quran_muaalem/engine/settings.py](src/quran_muaalem/engine/settings.py), [src/quran_muaalem/app/settings.py](src/quran_muaalem/app/settings.py), and [src/quran_muaalem/msa/settings.py](src/quran_muaalem/msa/settings.py).
 
 ### Use a fine-tuned MSA checkpoint
 
@@ -156,6 +162,34 @@ Running on local URL:  http://127.0.0.1:7860
 | http://localhost:8000/health | `{"status":"ok"}` |
 | http://localhost:8001/health | `{"status":"healthy","engine_status":"ok"}` |
 | http://localhost:7860 | Gradio interface renders |
+
+### Starting the MSA stack
+
+In two more terminals (the MSA stack is independent of the Quranic one):
+
+```bash
+# Terminal 4 — MSA API (loads the fine-tuned checkpoint)
+python3.14 -m uv run quran-muaalem-msa-api
+
+# Terminal 5 — MSA UI
+python3.14 -m uv run quran-muaalem-msa-ui
+```
+
+| URL | Expected |
+|---|---|
+| http://localhost:8010/health | `{"status":"ok","model_path":"…","device":"cpu"}` |
+| http://localhost:8010/docs | FastAPI interactive docs |
+| http://localhost:7870 | MSA Gradio UI with three tabs |
+
+The MSA API has three endpoints:
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| POST | `/transcribe` | `audio` (file) | `{"phonemes": "..."}` |
+| POST | `/align` | `audio` (file) | phonemes + per-phoneme `start`/`end`/`confidence` |
+| POST | `/compare` | `audio` (file), `expected_text` (form) | full diff with PER, substitutions, inserts, deletes |
+
+Phonemization for `/compare` follows the project's training-time mapping, which **drops alif `ا` and alif maksura `ى`** so predicted and expected sequences are directly comparable. See [src/quran_muaalem/msa/phonemize.py](src/quran_muaalem/msa/phonemize.py) for the exact mapping.
 
 ---
 
@@ -262,13 +296,18 @@ muaalem/
 # Install
 python3.14 -m uv sync --extra engine --extra ui
 
-# Run (3 terminals)
-python3.14 -m uv run quran-muaalem-engine
-python3.14 -m uv run quran-muaalem-app
-python3.14 -m uv run quran-muaalem-ui
+# Quranic stack (3 terminals)
+python3.14 -m uv run quran-muaalem-engine    # :8000
+python3.14 -m uv run quran-muaalem-app       # :8001
+python3.14 -m uv run quran-muaalem-ui        # :7860
+
+# MSA stack (2 terminals)
+python3.14 -m uv run quran-muaalem-msa-api   # :8010
+python3.14 -m uv run quran-muaalem-msa-ui    # :7870
 
 # Open
-http://localhost:7860      # UI
-http://localhost:8001/docs # App API docs
-http://localhost:8000/docs # Engine API docs
+http://localhost:7860      # Quranic UI
+http://localhost:7870      # MSA UI
+http://localhost:8001/docs # Quranic App docs
+http://localhost:8010/docs # MSA API docs
 ```
