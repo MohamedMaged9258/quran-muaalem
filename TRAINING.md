@@ -1,6 +1,6 @@
 # TRAINING — MSA Fine-Tuning Process
 
-This document covers the full training pipeline: from raw Common Voice download to a fine-tuned MSA phoneme recognizer. For the model itself, see [MODEL.md](MODEL.md). For serving, see [RUNNING.md](RUNNING.md).
+This document covers the full training pipeline: from prepared dataset to a fine-tuned MSA phoneme recognizer. For obtaining and preparing the dataset, see [DATASET.md](DATASET.md). For the model itself, see [MODEL.md](MODEL.md). For serving, see [RUNNING.md](RUNNING.md).
 
 ---
 
@@ -49,46 +49,15 @@ python3.14 -m uv run python -c "import torch; print(torch.cuda.is_available(), t
 
 ## 3. Step 2 — Prepare the Dataset
 
-### 3a. Download Common Voice Arabic
+Download Common Voice Arabic, extract it under `datasets/common_voice_ar/`, then run the conversion script to produce `datasets/msa_speech/manifest.json`. Full instructions, expected layout, statistics, and troubleshooting are in **[DATASET.md](DATASET.md)**.
 
-1. Go to https://commonvoice.mozilla.org/en/datasets
-2. Pick the **Arabic** locale and download a release (e.g. Common Voice 17 Arabic).
-3. Extract the archive into `datasets/common_voice_ar/`. You should end up with:
-
-```
-datasets/common_voice_ar/
-├── clips/                     # *.mp3 audio files
-├── train.tsv
-├── dev.tsv
-├── test.tsv
-├── validated.tsv
-└── ...
-```
-
-### 3b. Convert to WAV + phoneme manifest
+Quick version:
 
 ```bash
 python3.14 -m uv run python -m quran_muaalem.data.prepare_common_voice
 ```
 
-What this does (see [src/quran_muaalem/data/prepare_common_voice.py](src/quran_muaalem/data/prepare_common_voice.py)):
-
-- Reads `train.tsv`, `dev.tsv`, `test.tsv`.
-- Loads each MP3 with `librosa` and resamples to **16 kHz mono**.
-- Writes `audio_NNNNNN.wav` into `datasets/msa_speech/{train,val,test}/`.
-- Maps each Arabic character to its MSA phoneme via `ArabicToPhonemes.PHONEME_MAP`.
-- Filters out clips shorter than 0.5s or longer than 30s.
-- Writes a single `datasets/msa_speech/manifest.json` with three splits:
-
-```json
-{
-  "train": [{"audio": "datasets/msa_speech/train/audio_000000.wav", "phonemes": "د ر س"}, ...],
-  "val":   [...],
-  "test":  [...]
-}
-```
-
-After this step, expect roughly **49,601 samples / 17.4 hours** (depending on which CV release you picked) split 70 / 15 / 15.
+After this step you should have ~49,601 samples / 17.4 h split 70 / 15 / 15.
 
 ---
 

@@ -9,10 +9,11 @@ Two layered projects in one tree:
 1. **Quran Muaalem (upstream)** — the original `obadx/quran-muaalem` package: a Wav2Vec2-BERT + Multi-Level CTC model that transcribes Quranic recitations into phonemes and predicts tajweed/sifat properties. Shipped as three services (engine, app, UI). Owned upstream; treat its files as read-only unless explicitly editing them.
 2. **MSA fine-tuning extension (in-tree work)** — adapts the upstream model to recognize Modern Standard Arabic phonemes (31 classes instead of 43 Quranic classes) using Common Voice Arabic data. Lives under `src/quran_muaalem/data/`, `src/quran_muaalem/training/`, and the `msa_*.py` / `adapt_model_for_msa.py` files in `src/quran_muaalem/modeling/`.
 
-The three project-level guides explain each layer in depth:
+The four project-level guides explain each layer in depth:
 - [MODEL.md](MODEL.md) — architecture, the 31-token MSA inventory, the head-resize procedure
-- [TRAINING.md](TRAINING.md) — full data prep + fine-tuning pipeline
-- [RUNNING.md](RUNNING.md) — install + serve the three runtime services
+- [DATASET.md](DATASET.md) — Common Voice Arabic download, extraction, and manifest preparation
+- [TRAINING.md](TRAINING.md) — fine-tuning pipeline (assumes the manifest is ready)
+- [RUNNING.md](RUNNING.md) — install + serve the runtime services (upstream Quranic + MSA stacks)
 
 When the user asks about training/serving/architecture, prefer pointing at (and editing) these three files over creating new docs.
 

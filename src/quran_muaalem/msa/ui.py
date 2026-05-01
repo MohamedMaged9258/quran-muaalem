@@ -53,63 +53,72 @@ def build_ui(settings: MSASettings | None = None) -> gr.Blocks:
             raise gr.Error("please record or upload an audio clip first")
         return {"audio": ("clip.wav", wav, "audio/wav")}
 
-    def transcribe(audio):
-        return _post("/transcribe", _files(audio))["phonemes"]
+    EMPTY_DIFF = [["—", "—", "—"]]
+    EMPTY_ALIGN = [["—", "—", "—", "—"]]
 
-    def align(audio):
-        data = _post("/align", _files(audio))
-        rows = [
+    def analyze(audio, expected_text):
+        files = _files(audio)
+        expected_text = (expected_text or "").strip()
+
+        if expected_text:
+            data = _post("/compare", files, {"expected_text": expected_text})
+            phonemes = " ".join(data["predicted_phonemes"])
+            align_rows = [
+                [a["phoneme"], f"{a['start']:.2f}", f"{a['end']:.2f}", f"{a['confidence']:.2%}"]
+                for a in data["alignments"]
+            ] or EMPTY_ALIGN
+            diff_rows = [[op["kind"], op["expected"], op["predicted"]] for op in data["ops"]] or EMPTY_DIFF
+            summary = (
+                f"Matches {data['matches']}  ·  "
+                f"Subs {data['substitutions']}  ·  "
+                f"Inserts {data['insertions']}  ·  "
+                f"Deletes {data['deletions']}  ·  "
+                f"PER {data['phoneme_error_rate']:.1%}"
+            )
+            return phonemes, align_rows, summary, diff_rows
+
+        data = _post("/align", files)
+        align_rows = [
             [a["phoneme"], f"{a['start']:.2f}", f"{a['end']:.2f}", f"{a['confidence']:.2%}"]
             for a in data["alignments"]
-        ]
-        return data["phonemes"], rows
-
-    def compare(audio, expected_text):
-        if not expected_text or not expected_text.strip():
-            raise gr.Error("please enter the expected Arabic text")
-        data = _post("/compare", _files(audio), {"expected_text": expected_text})
-        rows = [[op["kind"], op["expected"], op["predicted"]] for op in data["ops"]]
-        summary = (
-            f"Matches: {data['matches']}  |  "
-            f"Subs: {data['substitutions']}  |  "
-            f"Inserts: {data['insertions']}  |  "
-            f"Deletes: {data['deletions']}  |  "
-            f"PER: {data['phoneme_error_rate']:.1%}"
-        )
-        return summary, rows
+        ] or EMPTY_ALIGN
+        return data["phonemes"], align_rows, "(no expected text — comparison skipped)", EMPTY_DIFF
 
     with gr.Blocks(title="Quran Muaalem — MSA") as demo:
         gr.Markdown("# Quran Muaalem — Modern Standard Arabic")
-        gr.Markdown(f"API: `{api_url}` · Model: `{settings.model_path}`")
+        gr.Markdown(
+            f"API: `{api_url}` · Model: `{settings.model_path}`  \n"
+            "Upload or record audio. Optionally provide expected text to get a phoneme-level diff."
+        )
 
-        with gr.Tab("Transcribe"):
-            t_audio = gr.Audio(sources=["microphone", "upload"], type="numpy", label="Audio")
-            t_btn = gr.Button("Transcribe", variant="primary")
-            t_out = gr.Textbox(label="Predicted phonemes", lines=2)
-            t_btn.click(transcribe, inputs=t_audio, outputs=t_out)
-
-        with gr.Tab("Align"):
-            a_audio = gr.Audio(sources=["microphone", "upload"], type="numpy", label="Audio")
-            a_btn = gr.Button("Align", variant="primary")
-            a_phon = gr.Textbox(label="Predicted phonemes", lines=2)
-            a_table = gr.Dataframe(
-                headers=["phoneme", "start (s)", "end (s)", "confidence"],
-                label="Per-phoneme timing",
-                interactive=False,
+        with gr.Row():
+            audio = gr.Audio(sources=["microphone", "upload"], type="numpy", label="Audio")
+            expected = gr.Textbox(
+                label="Expected Arabic text (optional)",
+                placeholder="اكتب النص المتوقع هنا للحصول على مقارنة",
+                lines=3,
+                rtl=True,
             )
-            a_btn.click(align, inputs=a_audio, outputs=[a_phon, a_table])
+        run_btn = gr.Button("Analyze", variant="primary")
 
-        with gr.Tab("Compare"):
-            c_audio = gr.Audio(sources=["microphone", "upload"], type="numpy", label="Audio")
-            c_text = gr.Textbox(label="Expected Arabic text", lines=2, rtl=True)
-            c_btn = gr.Button("Compare", variant="primary")
-            c_summary = gr.Textbox(label="Summary", lines=1)
-            c_table = gr.Dataframe(
-                headers=["op", "expected", "predicted"],
-                label="Per-position diff",
-                interactive=False,
-            )
-            c_btn.click(compare, inputs=[c_audio, c_text], outputs=[c_summary, c_table])
+        phonemes_out = gr.Textbox(label="Predicted phonemes", lines=2)
+        align_table = gr.Dataframe(
+            headers=["phoneme", "start (s)", "end (s)", "confidence"],
+            label="Per-phoneme alignment",
+            interactive=False,
+        )
+        summary_out = gr.Textbox(label="Comparison summary", lines=1)
+        diff_table = gr.Dataframe(
+            headers=["op", "expected", "predicted"],
+            label="Per-position diff",
+            interactive=False,
+        )
+
+        run_btn.click(
+            analyze,
+            inputs=[audio, expected],
+            outputs=[phonemes_out, align_table, summary_out, diff_table],
+        )
 
     return demo
 
