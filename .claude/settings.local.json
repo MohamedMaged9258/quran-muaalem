@@ -22,7 +22,8 @@
       "Bash(python3.14 -m uv run python -c \"import torch; print\\(f'PyTorch: {torch.__version__}'\\); print\\(f'CUDA: {torch.cuda.is_available\\(\\)}'\\); print\\(f'CUDA Version: {torch.version.cuda}'\\)\")",
       "Bash(nvidia-smi)",
       "Bash(taskkill /F /IM python.exe)",
-      "Bash(timeout 900 python3.14 -m uv run python train_msa_simple.py --device cpu --batch_size 1 --epochs 1 --num_workers 0)"
+      "Bash(timeout 900 python3.14 -m uv run python train_msa_simple.py --device cpu --batch_size 1 --epochs 1 --num_workers 0)",
+      "Bash(python3.14 -m uv run python -c \"from src.quran_muaalem.modeling.adapt_model_for_msa import adapt_model_for_msa; adapt_model_for_msa\\(\\)\")"
     ]
   }
 }
