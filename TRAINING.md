@@ -138,12 +138,7 @@ python3.14 -m uv run python train_msa_simple.py \
 ### Quick CPU smoke test (5 minutes)
 
 ```bash
-python3.14 -m uv run python train_msa_simple.py \
-    --model_name checkpoints/msa_model_adapted \
-    --device cpu \
-    --epochs 1 \
-    --batch_size 1 \
-    --max_samples 100
+python3.14 -m uv run python train_msa_simple.py --model_name checkpoints/msa_model_adapted --device cpu --epochs 1 --batch_size 1 --max_samples 100
 ```
 
 This validates the whole pipeline end-to-end without committing to a real training run.

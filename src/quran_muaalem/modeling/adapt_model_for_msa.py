@@ -9,6 +9,7 @@ This creates a new model checkpoint with the adapted architecture.
 
 import torch
 from pathlib import Path
+from transformers import AutoFeatureExtractor
 from .modeling_multi_level_ctc import Wav2Vec2BertForMultilevelCTC
 from .msa_vocab import MSA_PHONEME_COUNT
 
@@ -88,11 +89,16 @@ def adapt_model_for_msa(
     model.config.level_to_vocab_size["phonemes"] = new_output_dim
     print(f"   Updated vocab size in config")
 
-    # Step 5: Save adapted model
+    # Step 5: Save adapted model (weights + config + feature extractor)
     print("\n5. Saving adapted model...")
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(output_path)
+
+    # Also copy the feature extractor / preprocessor config so the
+    # checkpoint is self-contained for AutoFeatureExtractor.from_pretrained.
+    feature_extractor = AutoFeatureExtractor.from_pretrained(pretrained_model_path)
+    feature_extractor.save_pretrained(output_path)
     print(f"   Saved to: {output_path}")
 
     print("\n" + "=" * 70)
