@@ -27,7 +27,8 @@
       "PowerShell(python3.14 -m uv run python -c \"from src.quran_muaalem.modeling.adapt_model_for_msa import adapt_model_for_msa; adapt_model_for_msa\\(\\)\")",
       "Bash(python3.14 -m uv run python train_msa_simple.py --model_name checkpoints/msa_model_adapted --device cpu --epochs 1 --batch_size 1 --max_samples 100)",
       "Bash(wmic OS get FreePhysicalMemory,TotalVisibleMemorySize /format:value)",
-      "Bash(python3.14 -m uv run --extra ui python -c ' *)"
+      "Bash(python3.14 -m uv run --extra ui python -c ' *)",
+      "Bash(git stash *)"
     ]
   }
 }

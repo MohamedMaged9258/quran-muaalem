@@ -16,11 +16,10 @@ class MSASettings(BaseSettings):
     model_config = {"env_prefix": "MSA_"}
 
     model_path: str = Field(
-        default="checkpoints/msa_model_adapted",
+        default="checkpoints/msa_model_v1/best_model",
         description=(
-            "Path to a local MSA checkpoint. Defaults to the head-resized "
-            "(but untrained) adapter so the service can start before training. "
-            "Set MSA_MODEL_PATH=checkpoints/msa_model_v1/best_model after training."
+            "Path to a local MSA checkpoint. Defaults to the trained best_model. "
+            "Override with MSA_MODEL_PATH if you want to serve a specific epoch."
         ),
     )
     device: Literal["cpu", "cuda"] = Field(

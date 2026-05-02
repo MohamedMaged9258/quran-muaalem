@@ -35,6 +35,7 @@ class CTCTrainer:
         num_epochs: int = 20,
         save_dir: str = "checkpoints/msa_model",
         accumulation_steps: int = 1,
+        feature_extractor=None,
     ):
         self.device = torch.device(device)
         self.model = model.to(self.device)
@@ -44,6 +45,7 @@ class CTCTrainer:
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self.accumulation_steps = accumulation_steps
+        self.feature_extractor = feature_extractor
 
         self.optimizer = AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
         self.scheduler = CosineAnnealingLR(self.optimizer, T_max=num_epochs)
@@ -51,6 +53,13 @@ class CTCTrainer:
 
         self.best_val_loss = float("inf")
         self.history = {"train_loss": [], "val_loss": [], "lr": []}
+
+    def _save_pretrained(self, path: Path) -> None:
+        """Save the model and (if available) the feature extractor side-by-side
+        so the checkpoint is self-contained for `AutoFeatureExtractor.from_pretrained`."""
+        self.model.save_pretrained(path)
+        if self.feature_extractor is not None:
+            self.feature_extractor.save_pretrained(path)
 
     def train_epoch(self, epoch: int) -> float:
         """Train for one epoch."""
@@ -186,12 +195,12 @@ class CTCTrainer:
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 best_path = self.save_dir / "best_model"
-                self.model.save_pretrained(best_path)
+                self._save_pretrained(best_path)
                 print(f"  Saved best model (val_loss: {val_loss:.4f})")
 
             # Save checkpoint
             ckpt_path = self.save_dir / f"checkpoint_epoch_{epoch+1}"
-            self.model.save_pretrained(ckpt_path)
+            self._save_pretrained(ckpt_path)
 
         # Save training history
         history_path = self.save_dir / "training_history.json"
@@ -337,8 +346,10 @@ def main():
     print(f"Train samples: {len(train_dataset)}")
     print(f"Val samples: {len(val_dataset)}")
 
-    # Load model
+    # Load model + the feature extractor that goes with it (so the checkpoint
+    # we save can be loaded back by AutoFeatureExtractor.from_pretrained later).
     model = load_model_for_msa(args.model_name, device=args.device)
+    feature_extractor = AutoFeatureExtractor.from_pretrained(args.model_name)
 
     # Create trainer
     trainer = CTCTrainer(
@@ -350,6 +361,7 @@ def main():
         num_epochs=args.epochs,
         save_dir=args.output_dir,
         accumulation_steps=args.accumulation_steps,
+        feature_extractor=feature_extractor,
     )
 
     # Start training
