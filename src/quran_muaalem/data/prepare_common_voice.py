@@ -263,7 +263,7 @@ class CommonVoiceProcessor:
                     skipped += 1
                     continue
 
-        print(f"✅ Processed {split}: {processed_count} samples ({skipped} skipped)")
+        print(f"  Processed {split}: {processed_count} samples ({skipped} skipped)")
         return samples
 
     def create_manifest(self, samples: list) -> dict:
@@ -294,7 +294,7 @@ class CommonVoiceProcessor:
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest, f, ensure_ascii=False, indent=2)
 
-        print(f"✅ Manifest saved to {manifest_path}")
+        print(f"  Manifest saved to {manifest_path}")
         print(f"   Train: {len(manifest['train'])} samples")
         print(f"   Val: {len(manifest['val'])} samples")
         print(f"   Test: {len(manifest['test'])} samples")
@@ -318,7 +318,7 @@ def main():
     cv_path = Path("datasets/common_voice_ar")
 
     if not cv_path.exists():
-        print(f"❌ Common Voice path not found: {cv_path}")
+        print(f"  ERROR: Common Voice path not found: {cv_path}")
         print("Please download from: https://commonvoice.mozilla.org/en/datasets")
         return
 
@@ -341,7 +341,7 @@ def main():
     # Create manifest
     manifest = processor.create_manifest(samples)
 
-    print(f"\n✅ Dataset ready for training!")
+    print(f"\n  Dataset ready for training!")
     print(f"   Location: {processor.output_dir}")
     print(f"   Train samples: {len(manifest['train'])}")
     print(f"   Val samples: {len(manifest['val'])}")

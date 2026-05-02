@@ -2,6 +2,8 @@
 
 This document covers the full training pipeline: from prepared dataset to a fine-tuned MSA phoneme recognizer. For obtaining and preparing the dataset, see [DATASET.md](DATASET.md). For the model itself, see [MODEL.md](MODEL.md). For serving, see [RUNNING.md](RUNNING.md).
 
+> **Heads-up if you trained before this revision.** Two bugs in the data pipeline meant earlier runs trained on corrupted labels: every sample's label was clipped to a single phoneme (wrong shape index in `MSAPhonemeDataset.__getitem__`), and the four emphatic consonants `ص ض ط ظ` were missing from the vocab and silently mapped to `[UNK]`. Both are fixed; any pre-existing `checkpoints/msa_model_adapted/` and `checkpoints/msa_model_v*/` are unusable. Re-run the adapter, then retrain from scratch.
+
 ---
 
 ## 1. Pipeline Overview
@@ -63,7 +65,7 @@ After this step you should have ~49,601 samples / 17.4 h split 70 / 15 / 15.
 
 ## 4. Step 3 — Adapt the Pre-Trained Model
 
-The pre-trained checkpoint outputs 43 Quranic phonemes. We resize it to 31 MSA phonemes once, then train.
+The pre-trained checkpoint outputs 43 Quranic phonemes. We resize it to 35 MSA phonemes once, then train.
 
 ```bash
 python3.14 -m uv run python -c "from src.quran_muaalem.modeling.adapt_model_for_msa import adapt_model_for_msa; adapt_model_for_msa()"
@@ -119,13 +121,13 @@ This validates the whole pipeline end-to-end without committing to a real traini
 Inside `CTCTrainer` (see [src/quran_muaalem/training/train_msa.py](src/quran_muaalem/training/train_msa.py)):
 
 1. **Freeze**: `load_model_for_msa()` sets `requires_grad=False` on every parameter, then re-enables only `level_to_lm_head["phonemes"]`. The encoder and unused heads stay frozen. `AdamW` is given only the trainable subset, so no optimizer state is allocated for the ~605 M frozen params.
-2. **Forward**: `_forward_loss(batch)` casts inputs to `model.dtype` (so bf16 weights on CUDA don't meet fp32 activations), runs the model, and pulls `outputs.logits["phonemes"]` of shape `(batch, T_enc, 31)`. The same helper is used for both training and validation, so the two paths never drift.
+2. **Forward**: `_forward_loss(batch)` casts inputs to `model.dtype` (so bf16 weights on CUDA don't meet fp32 activations), runs the model, and pulls `outputs.logits["phonemes"]` of shape `(batch, T_enc, 35)`. The same helper is used for both training and validation, so the two paths never drift.
 3. **Lengths**: `input_lengths` = the actual logits time dimension `T_enc` (NOT the attention-mask sum — the encoder downsamples ~2×). `target_lengths` = count of non-pad tokens per sample.
 4. **Loss**: log-probs are explicitly upcast to fp32 before `nn.CTCLoss(blank=0, zero_infinity=True)` — CTC doesn't support fp16/bf16.
 5. **Backward**: gradient accumulation (`--accumulation_steps`), `clip_grad_norm_(max_norm=1.0)`, `AdamW(weight_decay=0.01)`, `CosineAnnealingLR` step at end of epoch.
 6. **Checkpointing**: every epoch writes `checkpoint_epoch_N/`. Whenever `val_loss` improves, also writes `best_model/`. Each save includes the **feature extractor** (`preprocessor_config.json`) alongside `config.json` and `model.safetensors`, so the resulting directory can be loaded directly by `AutoFeatureExtractor.from_pretrained` with no extra setup. Final `training_history.json` records per-epoch train/val loss and learning rate.
 
-The dataset class [src/quran_muaalem/data/msa_dataset.py](src/quran_muaalem/data/msa_dataset.py) handles audio loading, feature extraction with `AutoFeatureExtractor`, padding to a fixed `max_features`, and tokenization via `MSATokenizer`. Labels are padded to length 256 with zeros for batching. If `model_name` looks like a local path that doesn't exist, the dataset fails fast with a clear `FileNotFoundError` instead of letting transformers misinterpret it as a HuggingFace repo id.
+The dataset class [src/quran_muaalem/data/msa_dataset.py](src/quran_muaalem/data/msa_dataset.py) handles audio loading, feature extraction with `AutoFeatureExtractor`, padding to a fixed `max_features`, and tokenization via `MSATokenizer`. Labels are padded to length 256 with zeros for batching, and any label longer than `T_enc - 5` is clipped so CTC can always emit it. The clip uses `features["input_features"].shape[1]` (the time axis) — an earlier bug used `shape[0]` (the batch dim, always 1), which silently truncated **every** label to a single phoneme. If `model_name` looks like a local path that doesn't exist (starts with `.`, `/`, `\`, `checkpoints`, or has a Windows drive letter), the dataset fails fast with a clear `FileNotFoundError`; plain HuggingFace repo ids like `obadx/muaalem-model-v3_2` are passed through untouched.
 
 ---
 
@@ -141,7 +143,7 @@ Targets after a full 20-epoch run on the adapted model with the full ~17 h MSA s
 
 ### Rough wall-clock
 
-With the encoder frozen, the **forward pass** still runs over all 605 M parameters (you still need its features), but **backward + optimizer** only touch the 32 K-param head. Per-step time is dominated by the encoder forward, not the optimizer.
+With the encoder frozen, the **forward pass** still runs over all 605 M parameters (you still need its features), but **backward + optimizer** only touch the ~36 K-param head. Per-step time is dominated by the encoder forward, not the optimizer.
 
 | Hardware | Per epoch | 20 epochs |
 |---|---|---|
@@ -184,6 +186,8 @@ checkpoints/msa_model_v1/
 | Loss stays at ~40, never drops | LR too high or label/blank mismatch. | Try `--lr 1e-5`. Verify `[PAD]=0` matches the CTC `blank=0`. |
 | OOM on GPU | Batch too large for 4 GB. | `--batch_size 1 --accumulation_steps 4`. |
 | Validation loss climbs while training drops | Overfitting on small data subset. | Train on the full set, lower LR, or stop earlier (use `best_model/`). |
+| `/transcribe` returns no phonemes after epoch 1 even on familiar audio | Pre-fix label-truncation bug clipped every label to 1 token, so the model only learned to emit a single phoneme then collapse to blanks; OR the head size doesn't match the active vocab. | Re-run the adapter to regenerate `checkpoints/msa_model_adapted/` against the current vocab, then retrain — old checkpoints are not salvageable. Use `POST /debug` on the API to inspect `blank_ratio` and the top-3 frame predictions. |
+| Loss drops fast on a small `--max_samples` run but the model produces empty output | Memorization of a tiny set + CTC blank collapse. | Validate the pipeline on the full dataset; the loss-vs-decode gap is real and only goes away with enough data and epochs. |
 
 ---
 

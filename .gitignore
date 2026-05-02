@@ -24,3 +24,19 @@ docs/.vitepress/dist/
 docs/.vitepress/temp/
 datasets
 checkpoints/
+
+# python tooling caches
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# editor / IDE state
+.vscode/
+.idea/
+
+# local secrets / overrides
+.env.local
+*.local.env

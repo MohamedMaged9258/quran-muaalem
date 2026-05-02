@@ -65,7 +65,7 @@ The pre-trained model has **43 Quranic phoneme classes** (including tajweed-spec
 
 ### Goal
 
-Replace the 43-class Quranic phoneme head with a **31-class MSA phoneme head**, while keeping the entire encoder frozen.
+Replace the 43-class Quranic phoneme head with a **35-class MSA phoneme head**, while keeping the entire encoder frozen.
 
 ```
    Original                          Adapted
@@ -73,19 +73,21 @@ Replace the 43-class Quranic phoneme head with a **31-class MSA phoneme head**, 
    Encoder (frozen)                  Encoder (frozen, identical)
         │                                 │
         ▼                                 ▼
-   phonemes head: Linear(1024, 43)   phonemes head: Linear(1024, 31)
+   phonemes head: Linear(1024, 43)   phonemes head: Linear(1024, 35)
    (Quranic + tajweed marks)         (MSA phonemes only)
 ```
 
-### MSA phoneme inventory (31 tokens)
+### MSA phoneme inventory (35 tokens)
 
 Defined in [src/quran_muaalem/modeling/msa_vocab.py](src/quran_muaalem/modeling/msa_vocab.py):
 
 | Group | Count | Tokens |
 |---|---|---|
-| Consonants | 24 | `ء ب ت ث ج ح خ د ذ ر ز س ش ص ض ط ظ ع غ ف ق ك ل م ن ه و ي` |
+| Consonants | 28 | `ء ب ت ث ج ح خ د ذ ر ز س ش ص ض ط ظ ع غ ف ق ك ل م ن ه و ي` |
 | Vowels / diacritics | 5 | `َ` (fatha), `ُ` (damma), `ِ` (kasra), `ْ` (sukun), `ة` (ta marbuta) |
 | Special | 2 | `[PAD]`, `[UNK]` |
+
+The 28 consonants include the four emphatic (pharyngealized) consonants `ص ض ط ظ`, which are distinct phonemes in MSA. An earlier 31-token version of the inventory dropped these and silently mapped them to `[UNK]` during training — that version is fixed: any checkpoint trained against the old vocab must be re-adapted and re-trained against the current 35-class head.
 
 ### Tokenizer
 
@@ -97,11 +99,11 @@ The script [src/quran_muaalem/modeling/adapt_model_for_msa.py](src/quran_muaalem
 
 1. Load `obadx/muaalem-model-v3_2` (43-class phonemes head).
 2. Read the head's `in_features` (1024) and `out_features` (43).
-3. Build a new `nn.Linear(1024, 31)`.
+3. Build a new `nn.Linear(1024, 35)`. The size is read from `MSA_PHONEME_COUNT`, so updating the inventory automatically updates the head.
 4. Initialize weights with small Gaussian noise, biases at zero.
-5. **Warm-start**: copy rows `0..30` of the old weight matrix and bias into the new layer (the first 31 Quranic phoneme rows overlap with MSA phonemes by index).
+5. **Warm-start**: copy rows `0..34` of the old weight matrix and bias into the new layer (the first 35 Quranic phoneme rows overlap with MSA phonemes by index).
 6. Replace `model.level_to_lm_head["phonemes"]` with the new layer.
-7. Update `config.level_to_vocab_size["phonemes"] = 31`.
+7. Update `config.level_to_vocab_size["phonemes"] = 35`.
 8. Save the resulting checkpoint to `checkpoints/msa_model_adapted/` — including the feature extractor (`preprocessor_config.json`) so the directory is self-contained for `AutoFeatureExtractor.from_pretrained`.
 
 The other heads (tajweed, sifat, etc.) are left in place but ignored during MSA training — only the `phonemes` head receives gradients.
@@ -121,7 +123,7 @@ For an input of `T_audio` waveform samples at 16 kHz, with the feature extractor
 | Raw audio | `(batch, T_audio)` | `T_audio = 16000 × duration` |
 | Feature extractor output | `(batch, T_feat, 160)` | `T_feat ≈ T_audio / 160` |
 | Encoder hidden states | `(batch, T_enc, 1024)` | `T_enc ≈ T_feat / 2` (~50 Hz) |
-| Phoneme logits | `(batch, T_enc, 31)` | one distribution over 31 classes per ~20 ms frame |
+| Phoneme logits | `(batch, T_enc, 35)` | one distribution over 35 classes per ~20 ms frame |
 
 For a 15-second clip: `T_audio = 240,000` → `T_feat ≈ 1500` → `T_enc ≈ 187` frames → 187 phoneme distributions.
 
@@ -134,7 +136,7 @@ For a 15-second clip: `T_audio = 240,000` → `T_feat ≈ 1500` → `T_enc ≈ 1
 | **Freeze the encoder** | It was pre-trained on 53k hours of speech. Fine-tuning it on ~17 hours of MSA would mostly hurt generalization. The CTC head has all the capacity we need to learn the new vocabulary. The trainer enforces this in [`load_model_for_msa`](src/quran_muaalem/training/train_msa.py): every parameter is set to `requires_grad=False`, then only the `phonemes` head is re-enabled. AdamW is built from the trainable subset, so no optimizer state is allocated for frozen weights — fits on a 4 GB GPU. |
 | **Phoneme-only output** | The other levels (tajweed, sifat) are Quran-specific. MSA doesn't need them, and dropping them simplifies labels, loss, and evaluation. |
 | **Reuse the multi-level class** | We keep the original `Wav2Vec2BertForMultilevelCTC` and just resize one head, so the engine/inference code keeps working unchanged. |
-| **31-class inventory** | Matches a standard Arabic phonetic alphabet without diacritization-rule artifacts that don't appear in Common Voice transcriptions. |
+| **35-class inventory** | The 28 canonical MSA consonants (including the emphatics `ص ض ط ظ`) + 5 vowel/diacritic tokens + `[PAD]`/`[UNK]`. Dropping the emphatics — as an earlier 31-class version did — silently maps them to `[UNK]` and corrupts ~10–15% of training labels. |
 
 ### Trainable parameter count
 
@@ -142,7 +144,7 @@ For a 15-second clip: `T_audio = 240,000` → `T_feat ≈ 1500` → `T_enc ≈ 1
 |---|---|
 | Wav2Vec2-BERT encoder | ~605 M, **frozen** |
 | Other CTC heads (tajweed, sifat, …) | ~50 K, **frozen** |
-| **MSA phonemes head** (`Linear(1024, 31)`) | **~32 K, trainable** |
+| **MSA phonemes head** (`Linear(1024, 35)`) | **~36 K, trainable** |
 
 The training run touches only ~0.005% of the total parameter count.
 

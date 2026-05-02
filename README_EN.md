@@ -50,6 +50,27 @@
 
 [![ALT_TEXT](https://img.youtube.com/vi/CsFoznO08-Q/0.jpg)](https://www.youtube.com/watch?v=CsFoznO08-Q)
 
+---
+
+## MSA fork (Modern Standard Arabic)
+
+This branch additionally includes a fine-tuning pipeline that adapts the upstream Quranic model to recognize **Modern Standard Arabic** phonemes (35-class inventory) using Common Voice Arabic. The MSA stack ships its own FastAPI service and Gradio UI, independent of the Quranic services.
+
+| Doc | Topic |
+|---|---|
+| [MODEL.md](MODEL.md) | Architecture, the 35-token MSA inventory, the head-resize procedure |
+| [DATASET.md](DATASET.md) | Common Voice Arabic download, extraction, and manifest preparation |
+| [TRAINING.md](TRAINING.md) | Fine-tuning pipeline (assumes the manifest is ready) |
+| [RUNNING.md](RUNNING.md) | Install + serve both stacks (Quranic + MSA) |
+
+Quick start for the MSA stack:
+
+```bash
+python3.14 -m uv run quran-muaalem-msa-api   # :8010
+python3.14 -m uv run quran-muaalem-msa-ui    # :7870
+```
+
+---
 
 ## Features
 

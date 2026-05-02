@@ -14,7 +14,8 @@ from .settings import MSASettings
 def build_ui(settings: MSASettings | None = None) -> gr.Blocks:
     settings = settings or MSASettings()
     api_url = settings.api_url.rstrip("/")
-    client = httpx.Client(timeout=50000.0)
+    # 120 s is plenty for CPU inference on a 15 s clip; CUDA is much faster.
+    client = httpx.Client(timeout=120.0)
 
     def _post(path: str, files: dict, data: dict | None = None) -> dict:
         try:

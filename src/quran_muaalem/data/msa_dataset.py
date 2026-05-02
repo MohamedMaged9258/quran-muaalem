@@ -52,9 +52,15 @@ class MSAPhonemeDataset(Dataset):
         # Setup feature extractor and tokenizer.
         # If model_name looks like a local path that doesn't exist, fail fast with
         # a useful message instead of letting transformers retry it as a HF repo
-        # id and surface a misleading 401.
-        if (("/" in model_name or "\\" in model_name)
-                and not Path(model_name).exists()):
+        # id and surface a misleading 401. We treat anything starting with '.', '/',
+        # or 'checkpoints' (or with a backslash / drive letter) as a local path —
+        # plain HF ids like "obadx/muaalem-model-v3_2" are passed through.
+        looks_local = (
+            "\\" in model_name
+            or model_name.startswith((".", "/", "checkpoints"))
+            or (len(model_name) >= 2 and model_name[1] == ":")
+        )
+        if looks_local and not Path(model_name).exists():
             raise FileNotFoundError(
                 f"Model path not found: {model_name}\n"
                 f"  - run adapt_model_for_msa() to recreate checkpoints/msa_model_adapted/\n"
@@ -119,13 +125,12 @@ class MSAPhonemeDataset(Dataset):
         # Tokenize phonemes
         token_ids = self.tokenizer.encode(phonetic_script)
 
-        # For CTC: input_length must be >= target_length
-        # Input features shape is (max_features, 160)
-        # After model processing: time_steps ≈ max_features / 2
-        # So we need to limit label length accordingly
-
-        input_time_steps = features["input_features"].shape[0] // 2
-        max_label_len = max(1, input_time_steps - 5)  # Leave some margin
+        # CTC: target_length must be <= input_length (logits time dim).
+        # features["input_features"] is (batch=1, T_feat, 160) here — squeeze
+        # happens below — so the time axis is shape[1], NOT shape[0]. The
+        # encoder downsamples by ~2, so logits time dim ≈ T_feat / 2.
+        input_time_steps = features["input_features"].shape[1] // 2
+        max_label_len = max(1, input_time_steps - 5)
 
         if len(token_ids) > max_label_len:
             token_ids = token_ids[:max_label_len]

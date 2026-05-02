@@ -48,7 +48,7 @@ def build_msa_vocab_json(output_path: str | Path):
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(vocab_dict, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ MSA vocabulary saved to {output_path}")
+    print(f"MSA vocabulary saved to {output_path}")
     print(f"   Total tokens: {len(vocab)}")
     return vocab_dict
 

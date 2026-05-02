@@ -72,12 +72,15 @@ If any of these errors out, re-run `uv sync` and check for missing dependencies.
 
 ## 4. Configuration (`.env`)
 
-The repo ships with a `.env` at the project root that selects CPU mode:
+The repo ships with a `.env` at the project root that selects CPU mode and points the MSA API at the latest fine-tuned checkpoint:
 
 ```dotenv
 ACCELERATOR=cpu
 DTYPE=float32
 ENGINE_URL=http://127.0.0.1:8000/predict
+
+MSA_MODEL_PATH=checkpoints/msa_model_v2/best_model
+MSA_DEVICE=cpu
 ```
 
 These are read by Pydantic settings classes:
@@ -181,13 +184,16 @@ python3.14 -m uv run quran-muaalem-msa-ui
 | http://localhost:8010/docs | FastAPI interactive docs |
 | http://localhost:7870 | MSA Gradio UI (single page, all features) |
 
-The MSA API has three endpoints:
+The MSA API has four endpoints:
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | POST | `/transcribe` | `audio` (file) | `{"phonemes": "..."}` |
 | POST | `/align` | `audio` (file) | phonemes + per-phoneme `start`/`end`/`confidence` |
 | POST | `/compare` | `audio` (file), `expected_text` (form) | full diff with PER, substitutions, inserts, deletes |
+| POST | `/debug` | `audio` (file) | `blank_ratio` + top-3 phonemes per frame for the first 10 frames |
+
+`POST /debug` is the diagnostic for "why am I getting an empty transcription?" — a `blank_ratio` close to `1.0` means the model is mostly emitting CTC blank, which usually means the checkpoint hasn't trained long enough yet (or, historically, was trained with the label-truncation bug — see [TRAINING.md](TRAINING.md)).
 
 The UI is a **single page**: audio in (mic or upload) on the left, optional Arabic expected-text on the right, one **Analyze** button. Output panels show predicted phonemes, the alignment table, comparison summary, and per-position diff. With expected text the UI calls `/compare`; without it, `/align`.
 

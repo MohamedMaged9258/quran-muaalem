@@ -1,1 +1,0 @@
-src/quran_muaalem/gradio_app.py

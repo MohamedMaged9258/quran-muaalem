@@ -78,12 +78,35 @@ class MSAInference:
         ids = [a.token_id for a in self.align(audio)]
         return self.tokenizer.decode(ids)
 
-    def blank_ratio(self, audio: NDArray[np.float32]) -> float:
-        """Fraction of frames where the blank/pad token is the argmax — useful for
-        diagnosing early-training collapse (value close to 1.0 → model outputs silence)."""
+    def diagnostics(self, audio: NDArray[np.float32], top_k: int = 3, n_frames: int = 10) -> dict:
+        """Return blank ratio plus the top-k tokens for the first `n_frames` frames.
+
+        Useful for diagnosing why the model produces an empty transcription:
+        - blank_ratio close to 1.0 → model is mostly emitting CTC blank, common
+          in early training. Train more epochs or check that label lengths
+          aren't being truncated (an old dataset bug clipped them to 1 token).
+        - blank_ratio low but argmax IDs are stuck on one phoneme → mode collapse.
+        """
         logits = self._logits(audio)
-        ids = logits.argmax(dim=-1)
-        return float((ids == PAD_TOKEN_IDX).float().mean().item())
+        probs = torch.softmax(logits, dim=-1)
+        ids = probs.argmax(dim=-1)
+        blank_ratio = float((ids == PAD_TOKEN_IDX).float().mean().item())
+
+        top = probs.topk(top_k, dim=-1)
+        frames = []
+        for i in range(min(n_frames, logits.shape[0])):
+            frames.append({
+                "frame": i,
+                "top_tokens": [
+                    {
+                        "id": int(idx),
+                        "phoneme": self.tokenizer.reverse_vocab.get(int(idx), "[UNK]"),
+                        "prob": float(prob),
+                    }
+                    for idx, prob in zip(top.indices[i].tolist(), top.values[i].tolist())
+                ],
+            })
+        return {"blank_ratio": blank_ratio, "frames": frames}
 
     def align(self, audio: NDArray[np.float32]) -> list[PhonemeAlignment]:
         """Return per-phoneme timestamps and confidences via CTC greedy decoding."""

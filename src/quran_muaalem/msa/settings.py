@@ -13,7 +13,10 @@ class MSASettings(BaseSettings):
     `MSA_MODEL_PATH=checkpoints/msa_model_v1/best_model`.
     """
 
-    model_config = {"env_prefix": "MSA_"}
+    # `protected_namespaces=()` silences the Pydantic v2 warning about
+    # `model_*` field names (Pydantic reserves the `model_` prefix; we want
+    # `model_path` because it's the natural name for the user-facing setting).
+    model_config = {"env_prefix": "MSA_", "protected_namespaces": ()}
 
     model_path: str = Field(
         default="checkpoints/msa_model_v1/best_model",
