@@ -107,16 +107,20 @@ The app expects the engine; the UI expects the app. Always start engine → app 
 
 Defined in [src/quran_muaalem/modeling/modeling_multi_level_ctc.py](src/quran_muaalem/modeling/modeling_multi_level_ctc.py). The key shape is:
 
-- A frozen Wav2Vec2-BERT encoder produces hidden states `(batch, T_enc, 1024)` at ~50 Hz.
+- A Wav2Vec2-BERT encoder produces hidden states `(batch, T_enc, 1024)` at ~50 Hz.
 - A `nn.ModuleDict` called `level_to_lm_head` holds one `nn.Linear(1024, vocab_size)` per "level". Levels are configured in `config.level_to_vocab_size` (e.g. `phonemes: 43`, `tajweed: ...`, `sifat properties: ...`).
 - `forward()` returns a `CausalLMOutput` whose `.logits` is **a dict** keyed by level name — not a tensor. Always index it as `outputs.logits["phonemes"]`.
 - During training, CTC loss is applied per level (weighted by `config.level_to_loss_weight`).
 
-The MSA extension (see [MODEL.md](MODEL.md)) keeps the encoder frozen and replaces only the `phonemes` head with a 31-class layer, copying the first 31 weight rows from the original 43-class head as a warm start. The other heads remain in place but are unused during MSA training.
+The MSA extension (see [MODEL.md](MODEL.md)) replaces the `phonemes` head with a 31-class layer (copying the first 31 weight rows from the original 43-class head as a warm start). At training time, [`load_model_for_msa`](src/quran_muaalem/training/train_msa.py) **enforces** the encoder freeze: every parameter is set to `requires_grad=False`, then only the phoneme head is re-enabled. AdamW is built from the trainable subset, so no optimizer state is allocated for the ~605 M frozen params (this is what makes 4 GB GPU training feasible). The other heads remain in place but are unused during MSA training.
 
 ### Multi-Level CTC + lengths gotcha
 
 When computing CTC loss manually (as in `CTCTrainer` in [training/train_msa.py](src/quran_muaalem/training/train_msa.py)), `input_lengths` must match the **actual logits time dimension `T_enc`**, not the attention-mask sum from the feature extractor side. The encoder downsamples by ~2×, and `T_enc < attention_mask.sum()` is required for CTC to be valid. Reusing the attention-mask sum will raise `Expected input_lengths to have value at most N, but got M`.
+
+### Dtype handling
+
+The model is loaded in **`bfloat16` on CUDA, `float32` on CPU** (see `load_model_for_msa`). The trainer's `_forward_loss` casts inputs to `model.dtype` before the forward pass — without it, fp32 audio features hitting bf16 weights raises `RuntimeError: expected scalar type Float but found BFloat16`. CTC log-probs are explicitly upcast to fp32 because `nn.CTCLoss` doesn't support fp16/bf16. Don't add `torch.autocast` — it's redundant when model and inputs already share a dtype.
 
 ### MSA fine-tuning data flow
 
@@ -132,7 +136,7 @@ manifest.json
             └── checkpoints/msa_model_v1/{best_model,checkpoint_epoch_N}/
 ```
 
-The adapted checkpoint MUST contain `preprocessor_config.json` (feature extractor) in addition to `config.json` and `model.safetensors`, otherwise `MSAPhonemeDataset` fails at `AutoFeatureExtractor.from_pretrained(...)`. The current `adapt_model_for_msa.py` saves the feature extractor; if you change the adapter, preserve that step.
+Any checkpoint we serve or train from MUST contain `preprocessor_config.json` (feature extractor) alongside `config.json` and `model.safetensors`, otherwise `AutoFeatureExtractor.from_pretrained(...)` fails. Both `adapt_model_for_msa.py` and `CTCTrainer._save_pretrained` save the feature extractor — if you change either, preserve that step. `MSAPhonemeDataset` and `MSAInference` both pre-validate the path and fail with a clear `FileNotFoundError` instead of letting transformers misinterpret a missing local dir as a HuggingFace repo id and surface a misleading 401.
 
 ## Environment Notes
 

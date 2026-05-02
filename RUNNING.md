@@ -179,7 +179,7 @@ python3.14 -m uv run quran-muaalem-msa-ui
 |---|---|
 | http://localhost:8010/health | `{"status":"ok","model_path":"…","device":"cpu"}` |
 | http://localhost:8010/docs | FastAPI interactive docs |
-| http://localhost:7870 | MSA Gradio UI with three tabs |
+| http://localhost:7870 | MSA Gradio UI (single page, all features) |
 
 The MSA API has three endpoints:
 
@@ -188,6 +188,10 @@ The MSA API has three endpoints:
 | POST | `/transcribe` | `audio` (file) | `{"phonemes": "..."}` |
 | POST | `/align` | `audio` (file) | phonemes + per-phoneme `start`/`end`/`confidence` |
 | POST | `/compare` | `audio` (file), `expected_text` (form) | full diff with PER, substitutions, inserts, deletes |
+
+The UI is a **single page**: audio in (mic or upload) on the left, optional Arabic expected-text on the right, one **Analyze** button. Output panels show predicted phonemes, the alignment table, comparison summary, and per-position diff. With expected text the UI calls `/compare`; without it, `/align`.
+
+The UI uses Gradio's `type="filepath"` mode and ships the raw bytes to the API, so it does **not** depend on `ffmpeg` for the round-trip. Microphone recordings come out as WAV which librosa decodes natively. Uploading MP3/M4A still requires `ffmpeg` somewhere on the system (librosa falls back to audioread).
 
 Phonemization for `/compare` follows the project's training-time mapping, which **drops alif `ا` and alif maksura `ى`** so predicted and expected sequences are directly comparable. See [src/quran_muaalem/msa/phonemize.py](src/quran_muaalem/msa/phonemize.py) for the exact mapping.
 
@@ -258,10 +262,14 @@ taskkill /PID <PID> /F
 | Error | Why | Fix |
 |---|---|---|
 | `ModuleNotFoundError: No module named 'torch'` | Dependencies not installed. | `python3.14 -m uv sync --extra engine --extra ui` |
-| `Address already in use` on 8000 / 8001 / 7860 | A previous run is still bound. | Kill the old PID (see §7), or change the port via env. |
-| `CUDA GPUs are not available` | No GPU / no driver. | Already auto-falls back to CPU; or set `ACCELERATOR=cpu` in `.env`. |
+| `Address already in use` on any of 8000/8001/7860/8010/7870 | A previous run is still bound. | Kill the old PID (see §7), or change the port via env. |
+| `CUDA GPUs are not available` | No GPU / no driver. | Already auto-falls back to CPU; or set `ACCELERATOR=cpu` (or `MSA_DEVICE=cpu`). |
 | App returns 502 / engine errors | Engine isn't up yet. | Always start the engine first and wait for "Application startup complete." |
 | UI loads but predictions hang | App can't reach engine. | Check `ENGINE_URL` in `.env` matches the engine's actual host:port. |
+| MSA UI: "could not reach API at http://127.0.0.1:8010" | MSA API isn't running yet. | Start `quran-muaalem-msa-api` first. |
+| MSA: `ffprobe not found` when uploading MP3 | librosa's audioread fallback needs `ffmpeg`. | Either install ffmpeg system-wide (`winget install ffmpeg`), or upload WAV. Microphone recordings are already WAV — no ffmpeg needed. |
+| MSA API: `OSError: ... preprocessor_config.json` | Pointing at a checkpoint dir that's missing the feature extractor. | Re-save the checkpoint with the current trainer (which writes it on every save), or copy `preprocessor_config.json` from `obadx/muaalem-model-v3_2`. |
+| MSA API: `FileNotFoundError: MSA checkpoint not found` | `MSA_MODEL_PATH` points at a directory that doesn't exist. | Re-run `adapt_model_for_msa()` for the adapted base, or train to produce `checkpoints/msa_model_v1/best_model/`. |
 | Engine OOM at startup | `bfloat16` not supported on your CPU, or model loaded in `float16`. | Set `DTYPE=float32` in `.env`. |
 
 ---

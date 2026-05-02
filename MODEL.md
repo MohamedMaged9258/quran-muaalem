@@ -102,7 +102,7 @@ The script [src/quran_muaalem/modeling/adapt_model_for_msa.py](src/quran_muaalem
 5. **Warm-start**: copy rows `0..30` of the old weight matrix and bias into the new layer (the first 31 Quranic phoneme rows overlap with MSA phonemes by index).
 6. Replace `model.level_to_lm_head["phonemes"]` with the new layer.
 7. Update `config.level_to_vocab_size["phonemes"] = 31`.
-8. Save the resulting checkpoint to `checkpoints/msa_model_adapted/`.
+8. Save the resulting checkpoint to `checkpoints/msa_model_adapted/` — including the feature extractor (`preprocessor_config.json`) so the directory is self-contained for `AutoFeatureExtractor.from_pretrained`.
 
 The other heads (tajweed, sifat, etc.) are left in place but ignored during MSA training — only the `phonemes` head receives gradients.
 
@@ -131,10 +131,20 @@ For a 15-second clip: `T_audio = 240,000` → `T_feat ≈ 1500` → `T_enc ≈ 1
 
 | Decision | Rationale |
 |---|---|
-| **Freeze the encoder** | It was pre-trained on 53k hours of speech. Fine-tuning it on ~17 hours of MSA would mostly hurt generalization. The CTC head has all the capacity we need to learn the new vocabulary. |
+| **Freeze the encoder** | It was pre-trained on 53k hours of speech. Fine-tuning it on ~17 hours of MSA would mostly hurt generalization. The CTC head has all the capacity we need to learn the new vocabulary. The trainer enforces this in [`load_model_for_msa`](src/quran_muaalem/training/train_msa.py): every parameter is set to `requires_grad=False`, then only the `phonemes` head is re-enabled. AdamW is built from the trainable subset, so no optimizer state is allocated for frozen weights — fits on a 4 GB GPU. |
 | **Phoneme-only output** | The other levels (tajweed, sifat) are Quran-specific. MSA doesn't need them, and dropping them simplifies labels, loss, and evaluation. |
 | **Reuse the multi-level class** | We keep the original `Wav2Vec2BertForMultilevelCTC` and just resize one head, so the engine/inference code keeps working unchanged. |
 | **31-class inventory** | Matches a standard Arabic phonetic alphabet without diacritization-rule artifacts that don't appear in Common Voice transcriptions. |
+
+### Trainable parameter count
+
+| Component | Params |
+|---|---|
+| Wav2Vec2-BERT encoder | ~605 M, **frozen** |
+| Other CTC heads (tajweed, sifat, …) | ~50 K, **frozen** |
+| **MSA phonemes head** (`Linear(1024, 31)`) | **~32 K, trainable** |
+
+The training run touches only ~0.005% of the total parameter count.
 
 ---
 

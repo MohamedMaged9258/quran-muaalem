@@ -95,14 +95,14 @@ The entry point is [train_msa_simple.py](train_msa_simple.py), which delegates t
 ### Recommended GPU command
 
 ```bash
-python3.14 -m uv run python train_msa_simple.py \
-    --model_name checkpoints/msa_model_adapted \
-    --device cuda \
-    --epochs 20 \
-    --batch_size 4 \
-    --lr 1e-4 \
-    --output_dir checkpoints/msa_model_v1
+# 4 GB GPU (e.g. RTX 2050) — keep activations small, accumulate gradients.
+python3.14 -m uv run python train_msa_simple.py --model_name checkpoints/msa_model_adapted --device cuda --epochs 20 --batch_size 1 --accumulation_steps 4 --lr 1e-4 --output_dir checkpoints/msa_model_v1
+
+# 8+ GB GPU — drop the accumulation, raise batch size.
+python3.14 -m uv run python train_msa_simple.py --model_name checkpoints/msa_model_adapted --device cuda --epochs 20 --batch_size 4 --lr 1e-4 --output_dir checkpoints/msa_model_v1
 ```
+
+Because the encoder is frozen, the GPU memory footprint is dominated by **activations** during the forward pass, not by optimizer state. `batch_size 1 + accumulation_steps 4` keeps activations small while preserving an effective batch size of 4.
 
 ### Quick CPU smoke test (5 minutes)
 
@@ -118,14 +118,14 @@ This validates the whole pipeline end-to-end without committing to a real traini
 
 Inside `CTCTrainer` (see [src/quran_muaalem/training/train_msa.py](src/quran_muaalem/training/train_msa.py)):
 
-1. **Forward**: feed the audio batch through the (frozen) encoder and the (trainable) phoneme head. Take `outputs.logits["phonemes"]` of shape `(batch, T_enc, 31)`.
-2. **Lengths**: `input_lengths` is set to the actual logits time dimension `T_enc` (not the attention mask) to satisfy CTC's `input_length >= target_length` requirement. `target_lengths` is the count of non-pad tokens per sample.
-3. **Loss**: `log_softmax` over the vocab axis, transpose to `(T_enc, batch, 31)`, then `nn.CTCLoss(blank=0, zero_infinity=True)`.
-4. **Backward**: gradient accumulation (`--accumulation_steps`), `clip_grad_norm_(max_norm=1.0)`, `AdamW(weight_decay=0.01)` step, `CosineAnnealingLR` step at the end of each epoch.
-5. **Validation**: same forward + loss on the validation split, no gradient.
-6. **Checkpointing**: every epoch writes `checkpoint_epoch_N/`. Whenever `val_loss` improves, also writes `best_model/`. Final `training_history.json` records per-epoch train/val loss and learning rate.
+1. **Freeze**: `load_model_for_msa()` sets `requires_grad=False` on every parameter, then re-enables only `level_to_lm_head["phonemes"]`. The encoder and unused heads stay frozen. `AdamW` is given only the trainable subset, so no optimizer state is allocated for the ~605 M frozen params.
+2. **Forward**: `_forward_loss(batch)` casts inputs to `model.dtype` (so bf16 weights on CUDA don't meet fp32 activations), runs the model, and pulls `outputs.logits["phonemes"]` of shape `(batch, T_enc, 31)`. The same helper is used for both training and validation, so the two paths never drift.
+3. **Lengths**: `input_lengths` = the actual logits time dimension `T_enc` (NOT the attention-mask sum — the encoder downsamples ~2×). `target_lengths` = count of non-pad tokens per sample.
+4. **Loss**: log-probs are explicitly upcast to fp32 before `nn.CTCLoss(blank=0, zero_infinity=True)` — CTC doesn't support fp16/bf16.
+5. **Backward**: gradient accumulation (`--accumulation_steps`), `clip_grad_norm_(max_norm=1.0)`, `AdamW(weight_decay=0.01)`, `CosineAnnealingLR` step at end of epoch.
+6. **Checkpointing**: every epoch writes `checkpoint_epoch_N/`. Whenever `val_loss` improves, also writes `best_model/`. Each save includes the **feature extractor** (`preprocessor_config.json`) alongside `config.json` and `model.safetensors`, so the resulting directory can be loaded directly by `AutoFeatureExtractor.from_pretrained` with no extra setup. Final `training_history.json` records per-epoch train/val loss and learning rate.
 
-The dataset class [src/quran_muaalem/data/msa_dataset.py](src/quran_muaalem/data/msa_dataset.py) handles audio loading, feature extraction with `AutoFeatureExtractor`, padding to a fixed `max_features`, and tokenization via `MSATokenizer`. Labels are padded to length 256 with zeros for batching.
+The dataset class [src/quran_muaalem/data/msa_dataset.py](src/quran_muaalem/data/msa_dataset.py) handles audio loading, feature extraction with `AutoFeatureExtractor`, padding to a fixed `max_features`, and tokenization via `MSATokenizer`. Labels are padded to length 256 with zeros for batching. If `model_name` looks like a local path that doesn't exist, the dataset fails fast with a clear `FileNotFoundError` instead of letting transformers misinterpret it as a HuggingFace repo id.
 
 ---
 
@@ -141,13 +141,15 @@ Targets after a full 20-epoch run on the adapted model with the full ~17 h MSA s
 
 ### Rough wall-clock
 
+With the encoder frozen, the **forward pass** still runs over all 605 M parameters (you still need its features), but **backward + optimizer** only touch the 32 K-param head. Per-step time is dominated by the encoder forward, not the optimizer.
+
 | Hardware | Per epoch | 20 epochs |
 |---|---|---|
 | RTX 2050 (4 GB) | 15–20 min | ~5–6 h |
 | Modern CPU (10 cores) | 2–3 h | 40–60 h |
 | Modest CPU (4 cores) | 5–8 h | 100+ h |
 
-CPU is fine for smoke tests but impractical for the full run.
+CPU is fine for smoke tests but impractical for the full run. First batch on CUDA always pays a 30–90 s warm-up tax (kernel JIT + cuDNN autotune); subsequent batches are 5–10× faster.
 
 ---
 
@@ -175,8 +177,12 @@ checkpoints/msa_model_v1/
 | `CUDA not available, falling back to CPU` | NVIDIA driver / CUDA toolkit not installed. | Install CUDA 12.1 + matching driver, or accept CPU. |
 | `Expected input_lengths to have value at most N, but got value M` | Training script desync — CTC `input_lengths` must equal logits time dim, not attention mask sum. | Already fixed in `train_msa.py`; pull latest if you're seeing this. |
 | `stack expects each tensor to be equal size` in DataLoader | Variable feature lengths across the batch. | `MSAPhonemeDataset.__getitem__` pads to `max_features`; check that `max_duration` is consistent. |
+| `RuntimeError: expected scalar type Float but found BFloat16` | Inputs reaching the model in fp32 while the model is bf16. | Already fixed: `_forward_loss` casts inputs to `model.dtype`. If you write a custom forward path, do the same. |
+| `RuntimeError: CUDA error: out of memory` after first batch finishes | Likely AdamW lazy-allocating optimizer state on the first `.step()`. | The trainer now passes only trainable params to AdamW (encoder is frozen), so this should be gone. If it returns, lower `--batch_size`. |
+| `Repository Not Found … 401 Client Error … checkpoints/msa_model_adapted` | The local path doesn't exist; transformers tried it as a HF repo id. | The dataset and adapter both validate the path now. Re-run `adapt_model_for_msa()` to recreate the directory. |
+| `Can't load … preprocessor_config.json` when serving a checkpoint | Older checkpoint saved without the feature extractor. | Re-save with the current trainer (which writes `preprocessor_config.json` on every save), or copy it from `obadx/muaalem-model-v3_2`. |
 | Loss stays at ~40, never drops | LR too high or label/blank mismatch. | Try `--lr 1e-5`. Verify `[PAD]=0` matches the CTC `blank=0`. |
-| OOM on GPU | Batch too large for 4 GB. | `--batch_size 2 --accumulation_steps 2`. |
+| OOM on GPU | Batch too large for 4 GB. | `--batch_size 1 --accumulation_steps 4`. |
 | Validation loss climbs while training drops | Overfitting on small data subset. | Train on the full set, lower LR, or stop earlier (use `best_model/`). |
 
 ---

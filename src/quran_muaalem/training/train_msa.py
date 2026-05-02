@@ -47,7 +47,8 @@ class CTCTrainer:
         self.accumulation_steps = accumulation_steps
         self.feature_extractor = feature_extractor
 
-        self.optimizer = AdamW(self.model.parameters(), lr=lr, weight_decay=0.01)
+        trainable = [p for p in self.model.parameters() if p.requires_grad]
+        self.optimizer = AdamW(trainable, lr=lr, weight_decay=0.01)
         self.scheduler = CosineAnnealingLR(self.optimizer, T_max=num_epochs)
         self.ctc_loss = CTCLoss(blank=0, zero_infinity=True)
 
@@ -61,6 +62,34 @@ class CTCTrainer:
         if self.feature_extractor is not None:
             self.feature_extractor.save_pretrained(path)
 
+    def _forward_loss(self, batch) -> torch.Tensor:
+        """Run a forward pass and compute CTC loss on the phonemes head."""
+        # Cast input to the model's dtype so layer_norm doesn't mix bf16 weights
+        # with fp32 activations. Mask stays integer.
+        input_features = batch["input_features"].to(self.device, dtype=self.model.dtype)
+        attention_mask = batch["attention_mask"].to(self.device)
+        labels = batch["labels"].to(self.device)
+
+        outputs = self.model(
+            input_features, attention_mask=attention_mask, return_dict=True
+        )
+        # outputs.logits is a {level: tensor} dict; we only train phonemes.
+        logits = outputs.logits["phonemes"]  # (batch, T_enc, vocab)
+
+        # CTC requires input_lengths to match logits' time dim, NOT the
+        # attention mask sum (encoder downsamples ~2x).
+        batch_size, logits_time, _ = logits.shape
+        input_lengths = torch.full(
+            (batch_size,), logits_time, dtype=torch.long, device="cpu"
+        )
+        target_lengths = (labels != 0).sum(dim=1).cpu()
+
+        # CTC needs fp32 log_probs.
+        log_probs = torch.nn.functional.log_softmax(
+            logits.transpose(0, 1).float(), dim=-1
+        )
+        return self.ctc_loss(log_probs, labels, input_lengths, target_lengths)
+
     def train_epoch(self, epoch: int) -> float:
         """Train for one epoch."""
         self.model.train()
@@ -69,39 +98,7 @@ class CTCTrainer:
 
         pbar = tqdm(self.train_loader, desc=f"Train Epoch {epoch+1}")
         for batch_idx, batch in enumerate(pbar):
-            input_features = batch["input_features"].to(self.device)
-            attention_mask = batch["attention_mask"].to(self.device)
-            labels = batch["labels"].to(self.device)
-
-            # Forward pass
-            is_cuda = self.device.type == "cuda"
-            with torch.autocast(device_type="cuda" if is_cuda else "cpu"):
-                outputs = self.model(
-                    input_features,
-                    attention_mask=attention_mask,
-                    return_dict=True,
-                )
-
-                # CTC loss on phoneme output
-                # outputs.logits is a dict with keys like "phonemes", "tajweed", etc.
-                logits_dict = outputs.logits
-                logits = logits_dict["phonemes"]  # Shape: (batch, time_steps, vocab_size)
-
-                # IMPORTANT: input_lengths must match the actual time dimension of logits
-                batch_size, logits_time, vocab_size = logits.shape
-                input_lengths = torch.full(
-                    (batch_size,), logits_time,
-                    dtype=torch.long, device='cpu'
-                )
-                target_lengths = (labels != 0).sum(dim=1).cpu()
-
-                # Reshape logits: (batch, time, vocab) -> (time, batch, vocab)
-                logits_t = logits.transpose(0, 1)
-                log_probs = torch.nn.functional.log_softmax(logits_t, dim=-1)
-
-                loss = self.ctc_loss(log_probs, labels, input_lengths, target_lengths)
-
-            # Backward pass with gradient accumulation
+            loss = self._forward_loss(batch)
             loss = loss / self.accumulation_steps
             loss.backward()
 
@@ -129,35 +126,11 @@ class CTCTrainer:
         with torch.no_grad():
             pbar = tqdm(self.val_loader, desc="Validating")
             for batch in pbar:
-                input_features = batch["input_features"].to(self.device)
-                attention_mask = batch["attention_mask"].to(self.device)
-                labels = batch["labels"].to(self.device)
-
-                outputs = self.model(
-                    input_features,
-                    attention_mask=attention_mask,
-                    return_dict=True,
-                )
-
-                logits_dict = outputs.logits
-                logits = logits_dict["phonemes"]
-
-                batch_size, logits_time, vocab_size = logits.shape
-                input_lengths = torch.full(
-                    (batch_size,), logits_time,
-                    dtype=torch.long, device='cpu'
-                )
-                target_lengths = (labels != 0).sum(dim=1).cpu()
-
-                logits_t = logits.transpose(0, 1)
-                log_probs = torch.nn.functional.log_softmax(logits_t, dim=-1)
-
-                loss = self.ctc_loss(log_probs, labels, input_lengths, target_lengths)
+                loss = self._forward_loss(batch)
                 total_loss += loss.item()
                 num_batches += 1
 
-        avg_loss = total_loss / num_batches
-        return avg_loss
+        return total_loss / num_batches
 
     def train(self):
         """Full training loop."""
@@ -215,16 +188,31 @@ class CTCTrainer:
 
 
 def load_model_for_msa(model_name: str, device: str = "cuda") -> nn.Module:
-    """Load pre-trained model and prepare for MSA fine-tuning."""
+    """Load pre-trained model and freeze everything except the MSA phoneme head.
+
+    Freezing the encoder is the whole point of this fine-tune: it dropped pre-training
+    on 53k hours of speech and the head only needs to relearn the new vocabulary
+    mapping. Skipping gradients/optimizer state for ~600M parameters cuts GPU
+    memory roughly in half and makes training fit on a 4 GB card.
+    """
     print("Loading pre-trained model...")
 
-    # Load base model
     model = Wav2Vec2BertForMultilevelCTC.from_pretrained(
         model_name,
         torch_dtype=torch.float32 if device == "cpu" else torch.bfloat16,
     )
 
-    print("Model loaded successfully")
+    # Freeze everything, then re-enable grads only on the phonemes head.
+    for p in model.parameters():
+        p.requires_grad = False
+    for p in model.level_to_lm_head["phonemes"].parameters():
+        p.requires_grad = True
+
+    n_total = sum(p.numel() for p in model.parameters())
+    n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(
+        f"Model loaded: {n_train/1e6:.2f}M trainable / {n_total/1e6:.2f}M total params"
+    )
     return model
 
 

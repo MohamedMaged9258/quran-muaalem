@@ -49,7 +49,17 @@ class MSAPhonemeDataset(Dataset):
         self.samples = manifest[split]
         print(f"Loaded {len(self.samples)} samples for {split} split")
 
-        # Setup feature extractor and tokenizer
+        # Setup feature extractor and tokenizer.
+        # If model_name looks like a local path that doesn't exist, fail fast with
+        # a useful message instead of letting transformers retry it as a HF repo
+        # id and surface a misleading 401.
+        if (("/" in model_name or "\\" in model_name)
+                and not Path(model_name).exists()):
+            raise FileNotFoundError(
+                f"Model path not found: {model_name}\n"
+                f"  - run adapt_model_for_msa() to recreate checkpoints/msa_model_adapted/\n"
+                f"  - or pass an existing checkpoint dir / HF repo id."
+            )
         self.processor = AutoFeatureExtractor.from_pretrained(model_name)
         self.tokenizer = MSATokenizer()
 
