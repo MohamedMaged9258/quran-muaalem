@@ -2,35 +2,13 @@
 
 from __future__ import annotations
 
-import io
-import wave
+import mimetypes
+from pathlib import Path
 
 import gradio as gr
 import httpx
-import numpy as np
 
 from .settings import MSASettings
-
-
-def _audio_to_wav_bytes(audio: tuple[int, np.ndarray] | None) -> bytes | None:
-    """Gradio gives us (sample_rate, np.int16-or-float). Pack into a WAV blob."""
-    if audio is None:
-        return None
-    sr, arr = audio
-    if arr.dtype.kind == "f":
-        arr = np.clip(arr, -1.0, 1.0)
-        arr = (arr * 32767).astype(np.int16)
-    elif arr.dtype != np.int16:
-        arr = arr.astype(np.int16)
-    if arr.ndim > 1:
-        arr = arr.mean(axis=1).astype(np.int16)
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sr)
-        wf.writeframes(arr.tobytes())
-    return buf.getvalue()
 
 
 def build_ui(settings: MSASettings | None = None) -> gr.Blocks:
@@ -47,11 +25,16 @@ def build_ui(settings: MSASettings | None = None) -> gr.Blocks:
             raise gr.Error(f"API error {resp.status_code}: {resp.text}")
         return resp.json()
 
-    def _files(audio) -> dict:
-        wav = _audio_to_wav_bytes(audio)
-        if wav is None:
+    def _files(audio_path: str | None) -> dict:
+        if not audio_path:
             raise gr.Error("please record or upload an audio clip first")
-        return {"audio": ("clip.wav", wav, "audio/wav")}
+        path = Path(audio_path)
+        try:
+            blob = path.read_bytes()
+        except OSError as exc:
+            raise gr.Error(f"could not read audio file: {exc}")
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        return {"audio": (path.name, blob, mime)}
 
     EMPTY_DIFF = [["—", "—", "—"]]
     EMPTY_ALIGN = [["—", "—", "—", "—"]]
@@ -92,7 +75,7 @@ def build_ui(settings: MSASettings | None = None) -> gr.Blocks:
         )
 
         with gr.Row():
-            audio = gr.Audio(sources=["microphone", "upload"], type="numpy", label="Audio")
+            audio = gr.Audio(sources=["microphone", "upload"], type="filepath", label="Audio")
             expected = gr.Textbox(
                 label="Expected Arabic text (optional)",
                 placeholder="اكتب النص المتوقع هنا للحصول على مقارنة",
