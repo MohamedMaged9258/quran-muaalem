@@ -14,7 +14,7 @@ from .settings import MSASettings
 def build_ui(settings: MSASettings | None = None) -> gr.Blocks:
     settings = settings or MSASettings()
     api_url = settings.api_url.rstrip("/")
-    client = httpx.Client(timeout=120.0)
+    client = httpx.Client(timeout=50000.0)
 
     def _post(path: str, files: dict, data: dict | None = None) -> dict:
         try:
@@ -45,7 +45,7 @@ def build_ui(settings: MSASettings | None = None) -> gr.Blocks:
 
         if expected_text:
             data = _post("/compare", files, {"expected_text": expected_text})
-            phonemes = " ".join(data["predicted_phonemes"])
+            phonemes = " ".join(data["predicted_phonemes"]) or "(no phonemes predicted — model may need more training epochs)"
             align_rows = [
                 [a["phoneme"], f"{a['start']:.2f}", f"{a['end']:.2f}", f"{a['confidence']:.2%}"]
                 for a in data["alignments"]
@@ -65,7 +65,10 @@ def build_ui(settings: MSASettings | None = None) -> gr.Blocks:
             [a["phoneme"], f"{a['start']:.2f}", f"{a['end']:.2f}", f"{a['confidence']:.2%}"]
             for a in data["alignments"]
         ] or EMPTY_ALIGN
-        return data["phonemes"], align_rows, "(no expected text — comparison skipped)", EMPTY_DIFF
+        phonemes = data["phonemes"]
+        if not phonemes:
+            phonemes = "(no phonemes predicted — model may need more training epochs)"
+        return phonemes, align_rows, "(no expected text — comparison skipped)", EMPTY_DIFF
 
     with gr.Blocks(title="Quran Muaalem — MSA") as demo:
         gr.Markdown("# Quran Muaalem — Modern Standard Arabic")

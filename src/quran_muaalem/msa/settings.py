@@ -23,15 +23,15 @@ class MSASettings(BaseSettings):
         ),
     )
     device: Literal["cpu", "cuda"] = Field(
-        default="cpu",
+        default="cuda",
         description="Inference device. Falls back to CPU automatically if CUDA is unavailable.",
     )
     sample_rate: int = Field(default=16000, description="Audio sample rate (must be 16000).")
-    api_host: str = Field(default="0.0.0.0", description="MSA API bind address.")
+    api_host: str = Field(default="localhost", description="MSA API bind address.")
     api_port: int = Field(default=8010, description="MSA API port (separate from upstream 8000/8001).")
     api_url: str = Field(
         default="http://127.0.0.1:8010",
         description="Where the UI looks for the API.",
     )
-    ui_host: str = Field(default="0.0.0.0", description="MSA UI bind address.")
+    ui_host: str = Field(default="localhost", description="MSA UI bind address.")
     ui_port: int = Field(default=7870, description="MSA UI port (separate from upstream 7860).")

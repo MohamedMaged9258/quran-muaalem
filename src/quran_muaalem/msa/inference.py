@@ -78,6 +78,13 @@ class MSAInference:
         ids = [a.token_id for a in self.align(audio)]
         return self.tokenizer.decode(ids)
 
+    def blank_ratio(self, audio: NDArray[np.float32]) -> float:
+        """Fraction of frames where the blank/pad token is the argmax — useful for
+        diagnosing early-training collapse (value close to 1.0 → model outputs silence)."""
+        logits = self._logits(audio)
+        ids = logits.argmax(dim=-1)
+        return float((ids == PAD_TOKEN_IDX).float().mean().item())
+
     def align(self, audio: NDArray[np.float32]) -> list[PhonemeAlignment]:
         """Return per-phoneme timestamps and confidences via CTC greedy decoding."""
         logits = self._logits(audio)

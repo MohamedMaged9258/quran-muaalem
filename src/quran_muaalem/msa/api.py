@@ -47,6 +47,32 @@ def create_app(settings: MSASettings | None = None) -> FastAPI:
             "device": str(inference.device),
         }
 
+    @app.post("/debug")
+    async def debug(audio: UploadFile = File(...)) -> dict:
+        """Diagnostic endpoint: returns blank_ratio and top-3 phonemes per frame.
+        A blank_ratio near 1.0 means the model is mostly predicting silence — normal
+        for checkpoints trained < 5 epochs on small datasets."""
+        wav = await _load_audio(audio)
+        ratio = inference.blank_ratio(wav)
+        logits = inference._logits(wav)
+        import torch
+        probs = torch.softmax(logits, dim=-1)
+        top3 = probs.topk(3, dim=-1)
+        frames = []
+        for i in range(min(10, logits.shape[0])):
+            frames.append({
+                "frame": i,
+                "top_tokens": [
+                    {
+                        "id": int(idx),
+                        "phoneme": inference.tokenizer.reverse_vocab.get(int(idx), "[UNK]"),
+                        "prob": float(prob),
+                    }
+                    for idx, prob in zip(top3.indices[i].tolist(), top3.values[i].tolist())
+                ],
+            })
+        return {"blank_ratio": ratio, "first_10_frames": frames}
+
     @app.post("/transcribe")
     async def transcribe(audio: UploadFile = File(...)) -> dict:
         wav = await _load_audio(audio)
